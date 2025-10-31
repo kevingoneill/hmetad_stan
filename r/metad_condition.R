@@ -26,7 +26,7 @@ data.simulated.stan <- list(N=nrow(d),
                             prior_sd_meta_c2=.5)
 
 ## fit stan model
-m <- cmdstan_model('stan/metad_condition.stan')
+m <- cmdstan_model('../stan/metad_condition.stan')
 
 prior <- m$sample(c(data.simulated.stan, prior_only=TRUE), chains=4, parallel_chains=4, init=0)
 
