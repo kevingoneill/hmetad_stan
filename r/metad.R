@@ -67,4 +67,4 @@ ggplot(draws, aes(x=.value)) +
           axis.title=element_blank(),
           axis.ticks.y=element_blank(),
           axis.text.y=element_blank())
-ggsave('plots/metad/recovery.png', width=8, height=8)
+ggsave('../plots/metad/recovery.png', width=8, height=8)

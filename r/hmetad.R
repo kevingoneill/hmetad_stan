@@ -77,7 +77,7 @@ d.average %>%
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
           panel.border=element_rect(linewidth=1.5),
           axis.line=element_blank())
-ggsave('plots/hmetad/recovery_d_prime.png', width=8, height=5)
+ggsave('../plots/hmetad/recovery_d_prime.png', width=8, height=5)
 
 d.average %>%
     filter(.variable=='c') %>%
@@ -91,7 +91,7 @@ d.average %>%
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
           panel.border=element_rect(linewidth=1.5),
           axis.line=element_blank())
-ggsave('plots/hmetad/recovery_c.png', width=8, height=5)
+ggsave('../plots/hmetad/recovery_c.png', width=8, height=5)
 
 d.average %>%
     filter(.variable=='log_M') %>%
@@ -105,7 +105,7 @@ d.average %>%
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
           panel.border=element_rect(linewidth=1.5),
           axis.line=element_blank())
-ggsave('plots/hmetad/recovery_log_M.png', width=8, height=5)
+ggsave('../plots/hmetad/recovery_log_M.png', width=8, height=5)
 
 ################################################################################
 ##                      Plot estimated correlations
@@ -124,4 +124,4 @@ fit %>%
           axis.title.y=element_blank(),
           axis.ticks.y=element_blank(),
           axis.text.y=element_blank())
-ggsave('plots/hmetad/recovery_corr.png', width=8, height=4)
+ggsave('../plots/hmetad/recovery_corr.png', width=8, height=4)
