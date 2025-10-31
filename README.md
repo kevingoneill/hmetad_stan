@@ -29,14 +29,14 @@ difference between subsequent thresholds.
 
 As of now, there are four implementations, all in the `stan`
 directory:
-    1. `meta_d.stan`: the basic meta-d' model
-    2. `meta_d_condition.stan`: the basic meta-d' model, estimated for
-       multiple between-participant conditions
-    3. `hmeta_d.stan`: the hierarchical meta-d' model for multiple
-       participants
-    4. `hmeta_d_condition.stan`: the hierarchical meta-d' model for
-       multiple participants and multiple within-participant
-       conditions.
+ 
+ 1. `meta_d.stan`: the basic meta-d' model
+ 2. `meta_d_condition.stan`: the basic meta-d' model, estimated for
+    multiple between-participant conditions
+ 3. `hmeta_d.stan`: the hierarchical meta-d' model for multiple
+    participants
+ 4. `hmeta_d_condition.stan`: the hierarchical meta-d' model for
+    multiple participants and multiple within-participant conditions.
 
 Requests for alternative experimental designs can be sent to
 <kevin.o'neill@ucl.ac.uk>.
