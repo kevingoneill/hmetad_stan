@@ -15,8 +15,7 @@ data {
   real prior_sd_d_prime;         // width of normal prior on d_prime (type-1 sensitivity)
   real prior_sd_c;               // width of normal prior on c (type-1 threshold)
   real prior_sd_log_M;           // width of lognormal prior on M (metacognitive efficiency)
-  real prior_mean_meta_c2;       // mean of lognormal prior on meta_c2 (type-2 thresholds)
-  real prior_sd_meta_c2;         // width of lognormal prior on meta_c2 (type-2 thresholds)
+  real prior_alpha_meta_c2;      // concentration of dirichlet prior on meta_c2 (type-2 thresholds)
 }
 
 transformed data {
@@ -44,17 +43,18 @@ parameters {
 
   // Type-2 signal detection paramters
   real<lower=0> M;        // metacognitive efficiency (meta_d_prime / d_prime)
-  vector[k] z_meta_c2_0;  // type-2 threshold for response=0 (on transformed scale for efficiency)
-  vector[k] z_meta_c2_1;  // type-2 threshold for response=1 (on transformed scale for efficiency)
+  positive_ordered[k] z_meta_c2_0; // type-2 threshold for response=0 (on transformed scale for efficiency)
+  positive_ordered[k] z_meta_c2_1; // type-2 threshold for response=1 (on transformed scale for efficiency)
 }
 
 transformed parameters {  
   real meta_d_prime = M * d_prime;       // estimated type-1 sensitivity based on confidence
   real meta_c = M * c;                   // estimated type-1 bias based on confidence such that meta_c_prime = c_prime
-  
+
+
   // transform type-2 thresholds to their true scale (index = confidence level)
-  vector[k] meta_c2_0 = meta_c - cumulative_sum(exp(z_meta_c2_0));
-  vector[k] meta_c2_1 = meta_c + cumulative_sum(exp(z_meta_c2_1));
+  vector[k] meta_c2_0 = meta_c - z_meta_c2_0;
+  vector[k] meta_c2_1 = meta_c + z_meta_c2_1;
 }
 
 model {
@@ -62,8 +62,8 @@ model {
   target += normal_lpdf(d_prime | 0, prior_sd_d_prime);
   target += normal_lpdf(c | 0, prior_sd_c);
   target += lognormal_lpdf(M | 0, prior_sd_log_M);
-  target += normal_lpdf(z_meta_c2_0 | prior_mean_meta_c2, prior_sd_meta_c2);
-  target += normal_lpdf(z_meta_c2_1 | prior_mean_meta_c2, prior_sd_meta_c2);
+  target += induced_dirichlet(rep_vector(prior_alpha_meta_c2, K),
+                              0, meta_d_prime, meta_c, meta_c2_0, meta_c2_1);
   
   if (!prior_only) {
     // model responses (hits/FAs only) with binomial distribution
@@ -99,3 +99,4 @@ generated quantities {
   array[2*K-1, 2] real ROC_1 = type1_ROC(theta_1, theta_2);
   array[2, K-1, 2] real ROC_2 = type2_ROC(theta_2);
 }
+
