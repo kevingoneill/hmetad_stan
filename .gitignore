@@ -6,3 +6,4 @@ plots
 ## ignore all stan executables
 stan/*
 !stan/*.stan
+!stan/*.stanfunctions
