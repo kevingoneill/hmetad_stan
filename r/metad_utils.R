@@ -110,7 +110,8 @@ sim_sdt <- function(N_trials=100, d_prime=1, c=0, log_M=0,
         return(d)
     } else {
         d %>%
-            uncount(n, .id='trial') %>%
+            uncount(n) %>%
+            mutate(trial=row_number()) %>%
             relocate(trial)
     }
 }
@@ -216,7 +217,7 @@ sim_sdt_participant <- function(N_participants=100, N_trials=100,
         unnest(data)
 }
 
-#' sim_sdt_participant(N_participants, N_trials, mu_d_prime, sd_d_prime, r_d_prime,
+#' sim_sdt_participant_condition(N_participants, N_trials, mu_d_prime, sd_d_prime, r_d_prime,
 #'                     mu_c, sd_c, r_c, mu_log_M, sd_log_M, r_log_M,
 #'                     mu_z_c2, sd_z_c2, r_z_c2_condition, r_z_c2_confidence, summarize):
 #'   Simulate a set of participants over multiple within-participant conditions
@@ -236,43 +237,42 @@ sim_sdt_participant <- function(N_participants=100, N_trials=100,
 #'   If summarize=FALSE, returns a dataset with one row per observation.
 #'   If summarize=TRUE, returns an aggregated dataset where `n` is the
 #'   number of observations per participant, response, accuracy, and confidence level.
-sim_sdt_participant_condition <-
-    function(N_participants=100, N_trials=100,
-             mu_d_prime=rep(1, 2), sd_d_prime=rep(.5, 2), r_d_prime=diag(2),
-             mu_c=rep(0, 2), sd_c=rep(.5, 2), r_c=diag(2),
-             mu_log_M=rep(0, 2), sd_log_M=rep(.5, 2), r_log_M=diag(2),
-             mu_z_c2=matrix(rep(-1, 6), nrow=3, ncol=2),
-             sd_z_c2_condition=rep(.1, 2), r_z_c2_condition=diag(2),
-             sd_z_c2_confidence=rep(.1, 3), r_z_c2_confidence=diag(3),
-             summarize=FALSE) {
-        ## calculate covariance matrices
-        sigma_d_prime <- cov_matrix(sd_d_prime, r_d_prime)
-        sigma_c <- cov_matrix(sd_c, r_c)
-        sigma_log_M <- cov_matrix(sd_log_M, r_log_M)
-        L_sigma_z_c2_condition <- chol(cov_matrix(sd_z_c2_condition, r_z_c2_condition))
-        L_sigma_z_c2_confidence <- chol(cov_matrix(sd_z_c2_confidence, r_z_c2_confidence))
+sim_sdt_participant_condition <- function(N_participants=100, N_trials=100,
+                                          mu_d_prime=rep(1, 2), sd_d_prime=rep(.5, 2), r_d_prime=diag(2),
+                                          mu_c=rep(0, 2), sd_c=rep(.5, 2), r_c=diag(2),
+                                          mu_log_M=rep(0, 2), sd_log_M=rep(.5, 2), r_log_M=diag(2),
+                                          mu_z_c2=matrix(rep(-1, 6), nrow=3, ncol=2),
+                                          sd_z_c2_condition=rep(.1, 2), r_z_c2_condition=diag(2),
+                                          sd_z_c2_confidence=rep(.1, 3), r_z_c2_confidence=diag(3),
+                                          summarize=FALSE) {
+    ## calculate covariance matrices
+    sigma_d_prime <- cov_matrix(sd_d_prime, r_d_prime)
+    sigma_c <- cov_matrix(sd_c, r_c)
+    sigma_log_M <- cov_matrix(sd_log_M, r_log_M)
+    L_sigma_z_c2_condition <- chol(cov_matrix(sd_z_c2_condition, r_z_c2_condition))
+    L_sigma_z_c2_confidence <- chol(cov_matrix(sd_z_c2_confidence, r_z_c2_confidence))
 
-        expand_grid(participant=1:N_participants,
-                    condition=1:2) %>%
-            group_by(participant) %>%
-            mutate(d_prime=map_dbl(condition, function(condition, d) d[,condition],
-                                   rmvnorm(1, mu_d_prime, sigma_d_prime)),
-                   c=map_dbl(condition, function(condition, c) c[,condition],
-                             rmvnorm(1, mu_c, sigma_c)),
-                   log_M=map_dbl(condition, function(condition, log_m) log_m[,condition],
-                                 rmvnorm(1, mu_log_M, sigma_log_M)),
-                   c2_0=map(condition, function(condition, c2) c2[,condition],
-                            ordered_transform(rmatrixnorm(mu_z_c2,
-                                                          L_sigma_z_c2_confidence,
-                                                          L_sigma_z_c2_condition))),
-                   c2_1=map(condition, function(condition, c2) c2[,condition],
-                            ordered_transform(rmatrixnorm(mu_z_c2,
-                                                          L_sigma_z_c2_confidence,
-                                                          L_sigma_z_c2_condition)))) %>%
-            ungroup() %>%
-            mutate(data=pmap(list(d_prime, c, log_M, c2_0, c2_1),
-                             sim_sdt, N=N_trials, summarize=summarize)) %>%
-            select(participant, condition, data) %>%
-            unnest(data)
-    }
+    expand_grid(participant=1:N_participants,
+                condition=seq_along(mu_d_prime)) %>%
+        group_by(participant) %>%
+        mutate(d_prime=map_dbl(condition, function(condition, d) d[,condition],
+                               rmvnorm(1, mu_d_prime, sigma_d_prime)),
+               c=map_dbl(condition, function(condition, c) c[,condition],
+                         rmvnorm(1, mu_c, sigma_c)),
+               log_M=map_dbl(condition, function(condition, log_m) log_m[,condition],
+                             rmvnorm(1, mu_log_M, sigma_log_M)),
+               c2_0=map(condition, function(condition, c2) c2[,condition],
+                        ordered_transform(rmatrixnorm(mu_z_c2,
+                                                      L_sigma_z_c2_confidence,
+                                                      L_sigma_z_c2_condition))),
+               c2_1=map(condition, function(condition, c2) c2[,condition],
+                        ordered_transform(rmatrixnorm(mu_z_c2,
+                                                      L_sigma_z_c2_confidence,
+                                                      L_sigma_z_c2_condition)))) %>%
+        ungroup() %>%
+        mutate(data=pmap(list(d_prime, c, log_M, c2_0, c2_1),
+                         sim_sdt, N=N_trials, summarize=summarize)) %>%
+        select(participant, condition, data) %>%
+        unnest(data)
+}
 

@@ -145,8 +145,8 @@ parameters {
   matrix[k, P] z_meta_c2_0;
   matrix[k, P] z_meta_c2_1;
   
-  // Correlation matrices
-  cholesky_factor_corr[k] L_Omega_meta_c2;  // correlations between thresholds across confidence levels
+  // correlations between thresholds across confidence levels
+  cholesky_factor_corr[k] L_Omega_meta_c2;
 }
 
 transformed parameters {
@@ -161,11 +161,11 @@ transformed parameters {
   matrix[k, P] meta_c2_0;
   matrix[k, P] meta_c2_1;
   {
-    // pre-compute covariance between confidence thresholds and un-ordered thresholds
+    // pre-compute covariance between confidence thresholds
     matrix[k,k] L_Sigma_meta_c2 = diag_pre_multiply(sigma_meta_c2, L_Omega_meta_c2);
+    
     matrix[k, P] meta_C2_0 = exp(rep_matrix(mu_z_meta_c2_0, P) + L_Sigma_meta_c2 * z_meta_c2_0);
     matrix[k, P] meta_C2_1 = exp(rep_matrix(mu_z_meta_c2_1, P) + L_Sigma_meta_c2 * z_meta_c2_1);
-
     for (p in 1:P) {
       meta_c2_0[,p] = meta_c[p] - cumulative_sum(meta_C2_0[,p]);
       meta_c2_1[,p] = meta_c[p] + cumulative_sum(meta_C2_1[,p]);

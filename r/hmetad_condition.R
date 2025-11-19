@@ -56,16 +56,25 @@ fit$summary(c('mu_d_prime', 'mu_c', 'mu_log_M',
 ################################################################################
 d.average <- d %>%
     group_by(participant, condition) %>%
-    summarize(d_prime=mean(d_prime),
-              c=mean(c),
-              log_M=mean(log(M))) %>%
-    pivot_longer(d_prime:log_M, names_to='.variable', values_to='.true_value') %>%
+    filter(trial==1) %>%
+    mutate(log_M=mean(log(M)),
+           meta_c2_0_1=map_dbl(meta_c2_0, ~ .[1]),
+           meta_c2_0_2=map_dbl(meta_c2_0, ~ .[2]),
+           meta_c2_0_3=map_dbl(meta_c2_0, ~ .[3]),
+           meta_c2_1_1=map_dbl(meta_c2_1, ~ .[1]),
+           meta_c2_1_2=map_dbl(meta_c2_1, ~ .[2]),
+           meta_c2_1_3=map_dbl(meta_c2_1, ~ .[3])) %>%
+    select(participant, condition, d_prime, c, log_M, meta_c2_0_1:meta_c2_1_3) %>%
+    pivot_longer(d_prime:meta_c2_1_3, names_to='.variable', values_to='.true_value') %>%
     left_join(fit %>%
               gather_draws(d_prime[condition, participant],
                            c[condition, participant],
-                           M[condition, participant]) %>%
+                           M[condition, participant],
+                           meta_c2_0[condition, participant, k],
+                           meta_c2_1[condition, participant, k]) %>%
               mutate(.value=ifelse(.variable=='M', log(.value), .value),
-                     .variable=ifelse(.variable=='M', 'log_M', .variable)) %>%
+                     .variable=ifelse(.variable=='M', 'log_M', .variable),
+                     .variable=ifelse(is.na(k), .variable, paste0(.variable, '_', k))) %>%
               median_qi())
 
 d.average %>%
@@ -112,6 +121,21 @@ d.average %>%
           panel.border=element_rect(linewidth=1.5),
           axis.line=element_blank())
 ggsave('../plots/hmetad_condition/recovery_log_M.png', width=8, height=5)
+
+d.average %>%
+    filter(str_starts(.variable, 'meta_c2')) %>%
+    separate_wider_regex(.variable, patterns=c(.variable='meta_c2', '_',
+                                               response='.', '_', confidence='.')) %>%
+    ggplot(aes(x=.true_value, y=.value, ymin=.lower, ymax=.upper)) +
+    geom_abline(intercept=0, slope=1, linetype='dashed') +
+    geom_pointrange(size=.25) +
+    facet_grid(response+condition ~ confidence, labeller=label_both) +
+    xlab('True meta-c2') + ylab('Estimated meta-c2') +
+    ##coord_fixed() +
+    theme_classic(18) +
+    theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
+          panel.border=element_rect(linewidth=1.5),
+          axis.line=element_blank())
 
 ################################################################################
 ##                      Plot estimated correlations

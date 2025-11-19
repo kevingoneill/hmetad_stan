@@ -171,8 +171,8 @@ transformed parameters {
   matrix[W, P] meta_c = M .* c;
 
   // determine type 2 thresholds using matrix-normal distribution
-  array[P, W] vector[k] meta_c2_0;
-  array[P, W] vector[k] meta_c2_1;
+  array[W, P] vector[k] meta_c2_0;
+  array[W, P] vector[k] meta_c2_1;
   {
     // get covariance matrices across conditions & confidence levels
     matrix[W,W] L_Sigma_meta_c2_condition =
@@ -192,8 +192,8 @@ transformed parameters {
                               z_meta_c2_1[p] *
                               L_Sigma_meta_c2_condition);
       for (w in 1:W) {
-        meta_c2_0[p, w] = meta_c[w,p] - cumulative_sum(c2_0[,w]);
-        meta_c2_1[p, w] = meta_c[w,p] + cumulative_sum(c2_1[,w]);
+        meta_c2_0[w,p] = meta_c[w,p] - cumulative_sum(c2_0[,w]);
+        meta_c2_1[w,p] = meta_c[w,p] + cumulative_sum(c2_1[,w]);
       }
     }
   }
@@ -244,7 +244,7 @@ model {
           for (a in 0:1) {
             target += multinomial_lpmf(C[p, w, r+1, a+1] |
                                        type2_pmf(r, a, meta_d_prime[w,p], meta_c[w,p],
-                                                 meta_c2_0[p,w], meta_c2_1[p,w]));
+                                                 meta_c2_0[w,p], meta_c2_1[w,p]));
           }
         }
       }
@@ -294,7 +294,7 @@ generated quantities {
         for (j in 0:1) {
           theta_1[w, p, i+1, j+1] = type1_pmf(i, j, d_prime[w, p], c[w, p]);
           theta_2[w, p, i+1, j+1] = type2_pmf(i, j, meta_d_prime[w, p], meta_c[w, p],
-                                              meta_c2_0[p,w], meta_c2_1[p,w]);
+                                              meta_c2_0[w,p], meta_c2_1[w,p]);
         }
       }
 
