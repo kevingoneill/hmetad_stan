@@ -1,11 +1,11 @@
 // Convert a binary number x from {0, 1} to {-1, 1}
 int to_polar(int x) {
-    return 2*x - 1;
+  return 2*x - 1;
 }
 
 // Calculate the probability of making a response given a stimulus
 real type1_pmf(int stimulus, int response, real d_prime, real c) {
-    return Phi(to_polar(response) * (to_polar(stimulus)*d_prime/2 - c));
+  return Phi(to_polar(response) * (to_polar(stimulus)*d_prime/2 - c));
 }
 
 // Create a K-simplex of probabilities that confidence=k
@@ -17,107 +17,151 @@ real type1_pmf(int stimulus, int response, real d_prime, real c) {
 // real c: type-1 threshold
 // vector meta_c2_r: type-2 thresholds for response=r
 vector type2_pmf(int response, int accuracy, real meta_d_prime,
-                real meta_c, vector meta_c2_0, vector meta_c2_1) {
-    int K = size(meta_c2_0) + 1;
-    real mu = to_polar(accuracy) * meta_d_prime / 2;
+                 real meta_c, vector meta_c2_0, vector meta_c2_1) {
+  int K = size(meta_c2_0) + 1;
+  real mu = to_polar(accuracy) * meta_d_prime / 2;
+    
+  // set response-specific thresholds for vectorization
+  vector[K+1] C2;
+  if (response) {
+    C2[1] = meta_c;
+    C2[2:K] = meta_c2_1;
+    C2[K+1] = positive_infinity();
+  } else {
+    C2[1] = -meta_c;
+    C2[2:K] = -meta_c2_0;
+    C2[K+1] = positive_infinity();
+  }
 
-    // set response-specific thresholds for vectorization
-    vector[K+1] C2;
-    if (response) {
-        C2[1] = meta_c;
-        C2[2:K] = meta_c2_1;
-        C2[K+1] = positive_infinity();
-    } else {
-        C2[1] = -meta_c;
-        C2[2:K] = -meta_c2_0;
-        C2[K+1] = positive_infinity();
-    }
+  // compute response probabilities
+  vector[K+1] theta = Phi(mu - C2);
+  return (theta[1:K] - theta[2:(K+1)]) / theta[1];
+}
 
-    // compute response probabilities
-    vector[K+1] theta = Phi(mu - C2);
-    return (theta[1:K] - theta[2:(K+1)]) / theta[1];
+// P(response, confidence | stimulus) given as simplex
+// [P(resp=0, conf=K), .... P(resp=0, conf=1), P(resp=1, conf=1), ... P(resp=1, conf=K)]
+vector metad_joint_pmf(int stimulus, real d_prime, real c,
+                       real meta_d_prime, real meta_c,
+                       vector meta_c2_0, vector meta_c2_1) {
+  // number of confidence levels
+  int K = size(meta_c2_0)+1;
+    
+  // type-1 response probabilities
+  real lp_1 = std_normal_lcdf(to_polar(stimulus)*d_prime/2 - c);
+  real lp_0 = std_normal_lccdf(to_polar(stimulus)*d_prime/2 - c);
+
+  // means of type-2 distributions
+  real meta_mu_1 = to_polar(stimulus) * meta_d_prime/2;
+  real meta_mu_0 = -meta_mu_1;
+
+  // response probabilities
+  vector[2*K] log_theta;
+
+  // confidence = 1
+  log_theta[K] = log_diff_exp(std_normal_lcdf(meta_mu_0 + meta_c),
+                              std_normal_lcdf(meta_mu_0 + meta_c2_0[1]));
+  log_theta[K+1] = log_diff_exp(std_normal_lcdf(meta_mu_1 - meta_c),
+                                std_normal_lcdf(meta_mu_1 - meta_c2_1[1]));
+
+  // confidence = 2 ... K-1
+  for (k in 2:(K-1)) {
+    log_theta[K-k+1] = log_diff_exp(std_normal_lcdf(meta_mu_0 + meta_c2_0[k-1]),
+                                    std_normal_lcdf(meta_mu_0 + meta_c2_0[k]));
+    log_theta[K+k] = log_diff_exp(std_normal_lcdf(meta_mu_1 - meta_c2_1[k-1]),
+                                  std_normal_lcdf(meta_mu_1 - meta_c2_1[k]));
+  }
+
+  // confidence = K
+  log_theta[1] = std_normal_lcdf(meta_mu_0 + meta_c2_0[K-1]);
+  log_theta[2*K] = std_normal_lcdf(meta_mu_1 - meta_c2_1[K-1]);
+
+  // normalize
+  log_theta[1:K] += lp_0 - std_normal_lcdf(meta_mu_0 + meta_c);
+  log_theta[(K+1):(2*K)] += lp_1 - std_normal_lcdf(meta_mu_1 - meta_c);   
+    
+  return exp(log_theta);
 }
 
 // Compute the pseudo type-1 ROC given:
 //  theta_1: the type-1 response probabilities
 //  theta_2: the conditional type_2 response probabilities
 array[,] real type1_ROC(array[] vector theta_1, array[,] vector theta_2) {
-    int K = size(theta_2[1,1]);
-    array[2*K-1, 2] real ROC_1;
-    ROC_1[K, 1] = theta_1[1, 2];
-    ROC_1[K, 2] = theta_1[2, 2];
+  int K = size(theta_2[1,1]);
+  array[2*K-1, 2] real ROC_1;
+  ROC_1[K, 1] = theta_1[1, 2];
+  ROC_1[K, 2] = theta_1[2, 2];
 
-    for (i in 2:K) {
-        // pseudo type-1 FA  rate for confidence i
-        // stimulus == 0 (incorrect)
-        ROC_1[K-i+1, 1] = 1 - theta_1[1,1]*sum(theta_2[1, 2, i:K]);
-        ROC_1[K+i-1, 1] = theta_1[1,2]*sum(theta_2[2, 1, i:K]);
+  for (i in 2:K) {
+    // pseudo type-1 FA  rate for confidence i
+    // stimulus == 0 (incorrect)
+    ROC_1[K-i+1, 1] = 1 - theta_1[1,1]*sum(theta_2[1, 2, i:K]);
+    ROC_1[K+i-1, 1] = theta_1[1,2]*sum(theta_2[2, 1, i:K]);
         
-        // pseudo type-1 hit rate for confidence i
-        // stimulus == 1 (correct)
-        ROC_1[K-i+1, 2] = 1 - theta_1[2,1]*sum(theta_2[1, 1, i:K]);
-        ROC_1[K+i-1, 2] = theta_1[2,2]*sum(theta_2[2, 2, i:K]);
-    }
+    // pseudo type-1 hit rate for confidence i
+    // stimulus == 1 (correct)
+    ROC_1[K-i+1, 2] = 1 - theta_1[2,1]*sum(theta_2[1, 1, i:K]);
+    ROC_1[K+i-1, 2] = theta_1[2,2]*sum(theta_2[2, 2, i:K]);
+  }
 
-    return ROC_1;
+  return ROC_1;
 }
 
 // Compute the type-2 ROC given:
 //   theta_2: the conditional type-2 response probabilities
 array[,,] real type2_ROC(array[,] vector theta_2) {
-    int K = size(theta_2[1,1]);
-    array[2, K-1, 2] real ROC_2;
+  int K = size(theta_2[1,1]);
+  array[2, K-1, 2] real ROC_2;
 
-    for (i in 1:2) {
-        for (j in 2:K) {
-        ROC_2[i, j-1, 1] = sum(theta_2[i, 1, j:K]);  // type-2 FA rate
-        ROC_2[i, j-1, 2] = sum(theta_2[i, 2, j:K]);  // type-2 hit rate	
-        }
+  for (i in 1:2) {
+    for (j in 2:K) {
+      ROC_2[i, j-1, 1] = sum(theta_2[i, 1, j:K]);  // type-2 FA rate
+      ROC_2[i, j-1, 2] = sum(theta_2[i, 2, j:K]);  // type-2 hit rate	
     }
-    return ROC_2;
+  }
+  return ROC_2;
 }
 
 // phi(x): the likelihood of the standard normal distribution
 real phi(real x) {
-    return exp(std_normal_lpdf(x));
+  return exp(std_normal_lpdf(x));
 }
 
 real induced_dirichlet_response(vector alpha, int response, int accuracy,
-                        real meta_d_prime, real meta_c,
-                        vector meta_c2_0, vector meta_c2_1) {
-    int K = size(meta_c2_0) + 1;
-    // pre-compute evidence mean and type 1 response probability
-    real mu = to_polar(accuracy) * meta_d_prime / 2;
-    real p = Phi(to_polar(response) * (mu - meta_c));
-    real r = to_polar(response);
+                                real meta_d_prime, real meta_c,
+                                vector meta_c2_0, vector meta_c2_1) {
+  int K = size(meta_c2_0) + 1;
+  // pre-compute evidence mean and type 1 response probability
+  real mu = to_polar(accuracy) * meta_d_prime / 2;
+  real p = Phi(to_polar(response) * (mu - meta_c));
+  real r = to_polar(response);
         
 
-    vector[K] C2;
-    C2[1] = meta_c;
-    if (response)
-        C2[2:K] = meta_c2_1;
-    else
-        C2[2:K] = meta_c2_0;
+  vector[K] C2;
+  C2[1] = meta_c;
+  if (response)
+    C2[2:K] = meta_c2_1;
+  else
+    C2[2:K] = meta_c2_0;
 
-    // compute induced confidence probabilities
-    vector[K] p_confidence = type2_pmf(response, accuracy, meta_d_prime,
-                                        meta_c, meta_c2_0, meta_c2_1);
+  // compute induced confidence probabilities
+  vector[K] p_confidence = type2_pmf(response, accuracy, meta_d_prime,
+                                     meta_c, meta_c2_0, meta_c2_1);
 
-    // compute Jacobian matrix of P(conf | meta_c2)
-    matrix[K, K] J = rep_matrix(0, K, K);
-    J[, 1] = rep_vector(1, K);
-    for (k in 2:K) {
-        J[k-1, k] = r * phi(C2[k] - mu) / p;
-        J[k, k] = -r * phi(C2[k] - mu) / p;
-    }
+  // compute Jacobian matrix of P(conf | meta_c2)
+  matrix[K, K] J = rep_matrix(0, K, K);
+  J[, 1] = rep_vector(1, K);
+  for (k in 2:K) {
+    J[k-1, k] = r * phi(C2[k] - mu) / p;
+    J[k, k] = -r * phi(C2[k] - mu) / p;
+  }
 
-    return dirichlet_lpdf(p_confidence | alpha) +
-        log_determinant(J);
+  return dirichlet_lpdf(p_confidence | alpha) +
+    log_determinant(J);
 }
 
 real induced_dirichlet(vector alpha, int accuracy,
                        real meta_d_prime, real meta_c,
                        vector meta_c2_0, vector meta_c2_1) {
-    return induced_dirichlet_response(alpha, 0, accuracy, meta_d_prime, meta_c, meta_c2_0, meta_c2_1) + 
-        induced_dirichlet_response(alpha, 1, accuracy, meta_d_prime, meta_c, meta_c2_0, meta_c2_1);
+  return induced_dirichlet_response(alpha, 0, accuracy, meta_d_prime, meta_c, meta_c2_0, meta_c2_1) + 
+    induced_dirichlet_response(alpha, 1, accuracy, meta_d_prime, meta_c, meta_c2_0, meta_c2_1);
 }
