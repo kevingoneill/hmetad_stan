@@ -64,7 +64,7 @@ ggplot(draws, aes(x=.value)) +
     facet_wrap(~ .variable, scales='free_x') +
     theme_classic(18) +
     theme(panel.grid.major.x=element_line(linewidth=.5, color='grey80'),
-          panel.border=element_rect(linewidth=1.5),
+          panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank(),
           axis.title=element_blank(),
           axis.ticks.y=element_blank(),

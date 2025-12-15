@@ -6,27 +6,31 @@ library(mvtnorm)
 source('metad_utils.R')
 
 ## simulate an SDT agent for N trials
-d <- sim_sdt_condition(N_trials=10000,
+d <- sim_sdt_condition(N_trials=500,
                        d_prime=c(1, 2), c=c(-1, 1),
-                       log_M=c(-3/4, -1/3))
+                       log_M=c(-3/4, -1/3)) %>%
+    mutate(condition=factor(condition))
 
 
 ## format data for stan
 data.simulated.stan <- list(N=nrow(d),
                             K=n_distinct(d$confidence),
-                            B=n_distinct(d$condition),
+                            X=model.matrix(confidence ~ condition, d),
+                            N_x=ncol(model.matrix(~ condition, d)),
+                            N_pred=n_distinct(d$condition),
+                            X_pred=model.matrix(~ condition, count(d, condition)),
                             stimulus=d$stimulus,
                             response=d$response,
                             confidence=d$confidence,
-                            condition=d$condition,
-                            prior_sd_d_prime=1,
-                            prior_sd_c=1, 
-                            prior_sd_log_M=1,
-                            prior_mean_meta_c2=-1,
-                            prior_sd_meta_c2=.5)
+                            prior_sd_d_prime=2,
+                            prior_sd_c=2, 
+                            prior_sd_log_M=2,
+                            prior_mean_meta_c2=0,
+                            prior_sd_meta_c2=2)
+str(data.simulated.stan)
 
 ## fit stan model
-m <- cmdstan_model('../stan/metad_condition.stan')
+m <- cmdstan_model('../stan/metad_reg_joint.stan')
 
 prior <- m$sample(c(data.simulated.stan, prior_only=TRUE), chains=4, parallel_chains=4, init=0)
 
@@ -38,7 +42,7 @@ fit$summary(c('d_prime', 'c', 'M', 'meta_c2_0', 'meta_c2_1')) %>%
 
 
 ################################################################################
-##                      Plot participant-level recovery
+##                      Plot group-level recovery
 ################################################################################
 draws <- d %>%
     group_by(condition) %>%
@@ -54,13 +58,14 @@ draws <- d %>%
     pivot_longer(d_prime:meta_c2_1_3, names_to='.variable', values_to='.true_value') %>%
     right_join(fit %>%
                gather_draws(d_prime[condition], c[condition], M[condition],
-                            meta_c2_0[k,condition], meta_c2_1[k,condition]) %>%
-               mutate(.value=ifelse(.variable=='M', log(.value), .value),
+                            meta_c2_0[k, condition], meta_c2_1[k, condition]) %>%
+               mutate(condition=factor(levels(d$condition)[condition]),
+                      k=factor(k),
+                      .value=ifelse(.variable=='M', log(.value), .value),
                       .variable=ifelse(.variable=='M', 'log_M', .variable)) %>%
                mutate(.variable=ifelse(!is.na(k), paste0(.variable, '_', k), .variable)) %>%
                group_by(.variable) %>%
                select(-k))
-
 
 ggplot(draws, aes(x=.value)) +
     geom_vline(aes(xintercept=.true_value, color=factor(condition))) +
@@ -69,10 +74,10 @@ ggplot(draws, aes(x=.value)) +
     scale_fill_discrete(name='Condition') +
     scale_color_discrete(name='Condition') +
     theme_classic(18) +
-    theme(panel.grid.major.x=element_line(linewidth=.5, color='grey80'),
+    theme(##panel.grid.major.x=element_line(linewidth=.5, color='grey80'),
           panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank(),
           axis.title=element_blank(),
           axis.ticks.y=element_blank(),
           axis.text.y=element_blank())
-ggsave('../plots/metad_condition/recovery.png', width=8, height=6)
+ggsave('../plots/metad_reg_joint/recovery.png', width=8, height=6)

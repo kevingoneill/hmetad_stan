@@ -54,30 +54,28 @@ vector metad_joint_pmf(int stimulus, real d_prime, real c,
   real meta_mu_1 = to_polar(stimulus) * meta_d_prime/2;
   real meta_mu_0 = -meta_mu_1;
 
+  // calculate normal cdfs (log scale)
+  vector[K] lp2_1;
+  vector[K] lp2_0;
+  lp2_1[1] = std_normal_lcdf(meta_mu_1 - meta_c);
+  lp2_0[1] = std_normal_lcdf(meta_mu_0 + meta_c);
+  for (k in 2:K) {
+    lp2_1[k] = std_normal_lcdf(meta_mu_1 - meta_c2_1[k-1]);
+    lp2_0[k] = std_normal_lcdf(meta_mu_0 + meta_c2_0[k-1]);
+  }
+  
   // response probabilities
   vector[2*K] log_theta;
-
-  // confidence = 1
-  log_theta[K] = log_diff_exp(std_normal_lcdf(meta_mu_0 + meta_c),
-                              std_normal_lcdf(meta_mu_0 + meta_c2_0[1]));
-  log_theta[K+1] = log_diff_exp(std_normal_lcdf(meta_mu_1 - meta_c),
-                                std_normal_lcdf(meta_mu_1 - meta_c2_1[1]));
-
-  // confidence = 2 ... K-1
-  for (k in 2:(K-1)) {
-    log_theta[K-k+1] = log_diff_exp(std_normal_lcdf(meta_mu_0 + meta_c2_0[k-1]),
-                                    std_normal_lcdf(meta_mu_0 + meta_c2_0[k]));
-    log_theta[K+k] = log_diff_exp(std_normal_lcdf(meta_mu_1 - meta_c2_1[k-1]),
-                                  std_normal_lcdf(meta_mu_1 - meta_c2_1[k]));
+  for (k in 1:(K-1)) {
+    log_theta[K-k+1] = log_diff_exp(lp2_0[k], lp2_0[k+1]);
+    log_theta[K+k] = log_diff_exp(lp2_1[k], lp2_1[k+1]);
   }
-
-  // confidence = K
-  log_theta[1] = std_normal_lcdf(meta_mu_0 + meta_c2_0[K-1]);
-  log_theta[2*K] = std_normal_lcdf(meta_mu_1 - meta_c2_1[K-1]);
-
-  // normalize
-  log_theta[1:K] += lp_0 - std_normal_lcdf(meta_mu_0 + meta_c);
-  log_theta[(K+1):(2*K)] += lp_1 - std_normal_lcdf(meta_mu_1 - meta_c);   
+  log_theta[1] = lp2_0[K];
+  log_theta[2*K] = lp2_1[K];
+  
+  // weight by P(response|stimulus) and normalize
+  log_theta[1:K] += lp_0 - lp2_0[1];
+  log_theta[(K+1):(2*K)] += lp_1 - lp2_1[1];
     
   return exp(log_theta);
 }

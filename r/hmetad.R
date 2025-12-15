@@ -87,7 +87,7 @@ d.average %>%
                 ylim=round(range(d$d_prime)) + c(-.5, .5)) +
     theme_classic(18) +
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
-          panel.border=element_rect(linewidth=1.5),
+          panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank())
 ggsave('../plots/hmetad/recovery_d_prime.png', width=8, height=5)
 
@@ -101,7 +101,7 @@ d.average %>%
                 ylim=round(range(d$c)) + c(-.5, .5)) +
     theme_classic(18) +
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
-          panel.border=element_rect(linewidth=1.5),
+          panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank())
 ggsave('../plots/hmetad/recovery_c.png', width=8, height=5)
 
@@ -115,7 +115,7 @@ d.average %>%
                 ylim=round(range(log(d$M))) + c(-1, 1)) +
     theme_classic(18) +
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
-          panel.border=element_rect(linewidth=1.5),
+          panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank())
 ggsave('../plots/hmetad/recovery_log_M.png', width=8, height=5)
 
@@ -132,7 +132,7 @@ d.average %>%
     coord_fixed() +
     theme_classic(18) +
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
-          panel.border=element_rect(linewidth=1.5),
+          panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank())
 
 ################################################################################
@@ -147,7 +147,7 @@ fit %>%
                data=tibble(Omega_meta_c2=.5)) +
     theme_classic(18) +
     theme(panel.grid.major.x=element_line(linewidth=.5, color='grey80'),
-          panel.border=element_rect(linewidth=1.5),
+          panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank(),
           axis.title.y=element_blank(),
           axis.ticks.y=element_blank(),

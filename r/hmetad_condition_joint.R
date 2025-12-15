@@ -35,7 +35,7 @@ data.simulated.stan <- list(N=nrow(d),
                             prior_eta=1)
 
 ## fit stan model
-m <- cmdstan_model('../stan/hmetad_condition.stan')
+m <- cmdstan_model('../stan/hmetad_condition_joint.stan')
 
 prior <- m$sample(c(data.simulated.stan, prior_only=TRUE), chains=4, parallel_chains=4, init=0)
 
@@ -90,7 +90,7 @@ d.average %>%
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
           panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank())
-ggsave('../plots/hmetad_condition/recovery_d_prime.png', width=8, height=5)
+ggsave('../plots/hmetad_condition_joint/recovery_d_prime.png', width=8, height=5)
 
 d.average %>%
     filter(.variable=='c') %>%
@@ -105,7 +105,7 @@ d.average %>%
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
           panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank())
-ggsave('../plots/hmetad_condition/recovery_c.png', width=8, height=5)
+ggsave('../plots/hmetad_condition_joint/recovery_c.png', width=8, height=5)
 
 d.average %>%
     filter(.variable=='log_M') %>%
@@ -120,7 +120,7 @@ d.average %>%
     theme(panel.grid.major=element_line(linewidth=.5, color='grey80'),
           panel.border=element_rect(linewidth=1.5, fill=NA),
           axis.line=element_blank())
-ggsave('../plots/hmetad_condition/recovery_log_M.png', width=8, height=5)
+ggsave('../plots/hmetad_condition_joint/recovery_log_M.png', width=8, height=5)
 
 d.average %>%
     filter(str_starts(.variable, 'meta_c2')) %>%
@@ -160,4 +160,4 @@ fit %>%
           axis.title=element_blank(),
           axis.ticks.y=element_blank(),
           axis.text.y=element_blank())
-ggsave('../plots/hmetad_condition/recovery_corr.png', width=8, height=4)
+ggsave('../plots/hmetad_condition_joint/recovery_corr.png', width=8, height=4)
