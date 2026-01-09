@@ -1,5 +1,5 @@
 functions {
-  #include metad.stanfunctions
+#include metad.stanfunctions
 }
 
 data {
@@ -75,10 +75,10 @@ model {
     vector[N] ll = rep_vector(0, N);
     for (n in 1:N) {
       ll[n] += categorical_lpmf(joint_response[n] |
-				metad_joint_pmf(stimulus[n], d_prime[n], c[n],
-						meta_d_prime[n], meta_c[n],
-						meta_c[n]-cumulative_sum(d_meta_c2_0[,n]),
-						meta_c[n]+cumulative_sum(d_meta_c2_1[,n])));
+																metad_joint_pmf(stimulus[n], d_prime[n], c[n],
+																								meta_d_prime[n], meta_c[n],
+																								meta_c[n]-cumulative_sum(d_meta_c2_0[,n]),
+																								meta_c[n]+cumulative_sum(d_meta_c2_1[,n])));
     }
     target += sum(ll);
   }
@@ -110,9 +110,9 @@ generated quantities {
   for (n in 1:N_pred) {
     for (i in 0:1) {
       for (j in 0:1) {
-	theta_1[n, i+1, j+1] = type1_pmf(i, j, d_prime[n], c[n]);
-	theta_2[n, i+1, j+1] = type2_pmf(i, j, meta_d_prime[n], meta_c[n],
-					 meta_c2_0[,n], meta_c2_1[,n]);
+				theta_1[n, i+1, j+1] = type1_pmf(i, j, d_prime[n], c[n]);
+				theta_2[n, i+1, j+1] = type2_pmf(i, j, meta_d_prime[n], meta_c[n],
+																				 meta_c2_0[,n], meta_c2_1[,n]);
       }
     }
     

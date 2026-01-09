@@ -80,6 +80,37 @@ vector metad_joint_pmf(int stimulus, real d_prime, real c,
   return exp(log_theta);
 }
 
+/*
+// metad_brms_lpmf(Y[n] | mu[n], c[n], M[n], logdiff1metacneg, logdiff1metacpos);
+real metad_brms_lpmf(array[] int Y, real d_prime, real c,
+										 real M, real z_meta_c2_0_1, real z_meta_c2_1_1) {
+
+	int K = size(Y) / 4; // number of confidence levels
+
+	// format confidence counts
+	array[2, 2*K] int C;
+	for (s in 1:2) {
+		for (k in 1:K) {
+			C[s][K+1-k] = Y[2*K*(s-1) + k];
+			C[s][K+k] = Y[2*K*(s-1) + K + k];
+		}
+	}
+	//C[1] = Y[1:(2*K)];        // use this code for pre-formatted Y
+	//C[2] = Y[(2*K+1):(4*K)];
+
+	real meta_d_prime = M * d_prime;
+	real meta_c = M * c;
+	vector[K-1] meta_c2_0 = meta_c - cumulative_sum(exp([z_meta_c2_0_1]'));
+	vector[K-1] meta_c2_1 = meta_c + cumulative_sum(exp([z_meta_c2_1_1]'));
+	
+	// use categorical likelihood
+	return multinomial_lpmf(C[1] | metad_joint_pmf(0, d_prime, c,
+																								 meta_d_prime, meta_c, meta_c2_0, meta_c2_1)) +
+		multinomial_lpmf(C[2] |  metad_joint_pmf(1, d_prime, c,
+																						 meta_d_prime, meta_c, meta_c2_0, meta_c2_1));
+}
+*/
+
 // Compute the pseudo type-1 ROC given:
 //  theta_1: the type-1 response probabilities
 //  theta_2: the conditional type_2 response probabilities

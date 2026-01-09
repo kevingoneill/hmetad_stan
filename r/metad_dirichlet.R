@@ -68,7 +68,7 @@ fit %>%
     theme_classic(18)
 
 fit %>%
-    spread_draws(meta_c2_0[k], meta_c2_1[k]) %>%
+    gather_draws(meta_c2_0[k], meta_c2_1[k]) %>%
     group_by(.variable, .draw) %>%
     arrange(.draw) %>%
     left_join(spread_draws(fit, meta_c)) %>%
