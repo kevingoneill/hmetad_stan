@@ -38,12 +38,13 @@ vector type2_pmf(int response, int accuracy, real meta_d_prime,
   return (theta[1:K] - theta[2:(K+1)]) / theta[1];
 }
 
+
 // P(response, confidence | stimulus) given as simplex
 // [P(resp=0, conf=K), .... P(resp=0, conf=1), P(resp=1, conf=1), ... P(resp=1, conf=K)]
 vector metad_joint_pmf(int stimulus, real d_prime, real c,
                        real meta_d_prime, real meta_c,
                        vector meta_c2_0, vector meta_c2_1) {
-  // number of confidence levels
+	// number of confidence levels
   int K = size(meta_c2_0)+1;
     
   // type-1 response probabilities
@@ -54,21 +55,18 @@ vector metad_joint_pmf(int stimulus, real d_prime, real c,
   real meta_mu_1 = to_polar(stimulus) * meta_d_prime/2;
   real meta_mu_0 = -meta_mu_1;
 
-  // calculate normal cdfs (log scale)
-  vector[K] lp2_1;
-  vector[K] lp2_0;
+  vector[K] lp2_1;         // normal CDFs (response == 1)
+  vector[K] lp2_0;         // normal CDFs (response == 0)
+	vector[2*K] log_theta;   // joint (type-1 x type-2) response probabilities
+	
   lp2_1[1] = std_normal_lcdf(meta_mu_1 - meta_c);
   lp2_0[1] = std_normal_lcdf(meta_mu_0 + meta_c);
   for (k in 2:K) {
     lp2_1[k] = std_normal_lcdf(meta_mu_1 - meta_c2_1[k-1]);
     lp2_0[k] = std_normal_lcdf(meta_mu_0 + meta_c2_0[k-1]);
-  }
-  
-  // response probabilities
-  vector[2*K] log_theta;
-  for (k in 1:(K-1)) {
-    log_theta[K-k+1] = log_diff_exp(lp2_0[k], lp2_0[k+1]);
-    log_theta[K+k] = log_diff_exp(lp2_1[k], lp2_1[k+1]);
+
+		log_theta[K-k+2] = log_diff_exp(lp2_0[k-1], lp2_0[k]);
+    log_theta[K+k-1] = log_diff_exp(lp2_1[k-1], lp2_1[k]);
   }
   log_theta[1] = lp2_0[K];
   log_theta[2*K] = lp2_1[K];
@@ -79,37 +77,6 @@ vector metad_joint_pmf(int stimulus, real d_prime, real c,
     
   return exp(log_theta);
 }
-
-/*
-// metad_brms_lpmf(Y[n] | mu[n], c[n], M[n], logdiff1metacneg, logdiff1metacpos);
-real metad_brms_lpmf(array[] int Y, real d_prime, real c,
-										 real M, real z_meta_c2_0_1, real z_meta_c2_1_1) {
-
-	int K = size(Y) / 4; // number of confidence levels
-
-	// format confidence counts
-	array[2, 2*K] int C;
-	for (s in 1:2) {
-		for (k in 1:K) {
-			C[s][K+1-k] = Y[2*K*(s-1) + k];
-			C[s][K+k] = Y[2*K*(s-1) + K + k];
-		}
-	}
-	//C[1] = Y[1:(2*K)];        // use this code for pre-formatted Y
-	//C[2] = Y[(2*K+1):(4*K)];
-
-	real meta_d_prime = M * d_prime;
-	real meta_c = M * c;
-	vector[K-1] meta_c2_0 = meta_c - cumulative_sum(exp([z_meta_c2_0_1]'));
-	vector[K-1] meta_c2_1 = meta_c + cumulative_sum(exp([z_meta_c2_1_1]'));
-	
-	// use categorical likelihood
-	return multinomial_lpmf(C[1] | metad_joint_pmf(0, d_prime, c,
-																								 meta_d_prime, meta_c, meta_c2_0, meta_c2_1)) +
-		multinomial_lpmf(C[2] |  metad_joint_pmf(1, d_prime, c,
-																						 meta_d_prime, meta_c, meta_c2_0, meta_c2_1));
-}
-*/
 
 // Compute the pseudo type-1 ROC given:
 //  theta_1: the type-1 response probabilities

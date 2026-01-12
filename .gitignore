@@ -3,6 +3,8 @@
 **/#*.*#
 plots
 
+**/*.rds
+
 ## ignore all stan executables
 stan/*
 !stan/*.stan
