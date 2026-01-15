@@ -8,12 +8,13 @@ library(abind)
 source('metad_utils.R')
 source('metad_brms_utils.R')
 
+
 ################################################################################
 #                          Basic metad' model
 ################################################################################
 d <- sim_sdt(N_trials=100000, d_prime=1, c=0, log_M=0, c2_0=c(.5, 1), c2_1=c(.5, 1))
 
-m <- fit_metad(bf(N ~ 0 + Intercept), data=d,
+m <- fit_metad(bf(M ~ 0 + Intercept), data=d,
                cores=4, backend='cmdstanr',
                prior=prior(normal(0, 1)) +
                  prior(normal(0, 1), class=dprime) +
@@ -42,7 +43,7 @@ predicted_draws(m, newdata=metad_aggregate(d)) |>
   theme_classic(18)
 
 
-epred_draws(m, newdata=tibble(x=1)) |>
+epred_draws(m, newdata=tibble(.row=1)) |>
   group_by(.row, .category) |>
   median_qi(.epred) |>
   mutate(.true=response_probabilities(m$data$N[1,])) |>
@@ -61,7 +62,89 @@ epred_draws(m, newdata=tibble(x=1)) |>
 
 
 ## calculate mean confidence per stimulus
-epred_draws(m, tibble(.row=1)) |>
+tibble(.row=1) |>
+  add_mean_confidence_draws(m) |>
+  median_qi(.epred) |>
+  left_join(d |>
+              group_by(stimulus, response, confidence) |>
+              summarize(across(theta_1:theta_2, first)) |>
+              group_by(stimulus) |>
+              summarize(.true=sum(theta_1 * theta_2 * confidence)))
+
+# psuedo type-1 ROC
+tibble(.row=1) |>
+  add_roc1_draws(m, bounds=TRUE) |>
+  median_qi(p_fa, p_hit) |>
+  ggplot(aes(x=p_fa, xmin=p_fa.lower, xmax=p_fa.upper,
+             y=p_hit, ymin=p_hit.lower, ymax=p_hit.upper)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm)') + ylab('P(Hit)') +
+  theme_bw(18)
+
+# type 2 ROC
+tibble(.row=1) |>
+  add_roc2_draws(m, bounds=TRUE) |>
+  median_qi(p_hit2, p_fa2) |>
+  mutate(response=factor(response)) |>
+  ggplot(aes(x=p_fa2, xmin=p_fa2.lower, xmax=p_fa2.upper,
+             y=p_hit2, ymin=p_hit2.lower, ymax=p_hit2.upper,
+             color=response)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(Type 2 False Alarm)') + ylab('P(Type 2 Hit)') +
+  theme_bw(18)
+
+
+################################################################################
+#                    Basic meta-d' model w/ Gumbel-min noise
+################################################################################
+gumbel_min <- stanvar(scode='
+real gumbel_min_lccdf(real y) {
+  return -exp(y);
+}
+real gumbel_min_lcdf(real y) {
+  return log1m_exp(-exp(y));
+}
+', block='functions')
+
+g <- fit_metad(bf(M ~ 0 + Intercept), data=d,
+               cores=4, backend='cmdstanr',
+               prior=prior(normal(0, 1)) +
+                 prior(normal(0, 1), class=dprime) +
+                 prior(normal(0, 1), class=c) +
+                 prior(lognormal(0, 1), class=metac2zero1diff) +
+                 prior(lognormal(0, 1), class=metac2zero2diff) +
+                 prior(lognormal(0, 1), class=metac2one1diff) +
+                 prior(lognormal(0, 1), class=metac2one2diff),
+               stanvars=gumbel_min, distribution='gumbel_min')
+summary(g, prior=TRUE)
+
+epred_draws(g, newdata=tibble(.row=1)) |>
+  group_by(.row, .category) |>
+  median_qi(.epred) |>
+  mutate(.true=response_probabilities(g$data$M[1,])) |>
+  separate(.category, into=c('var', 'stimulus', 'joint_response'),
+           sep='_', convert=TRUE) |>
+  mutate(response=factor(as.integer(joint_response > max(joint_response)/2)),
+         confidence=factor(ifelse(joint_response > max(joint_response)/2,
+                                  joint_response-max(joint_response)/2,
+                                  max(joint_response)/2 - joint_response + 1))) |>
+  ggplot(aes(x=joint_response)) +
+  geom_col(aes(y=.true, fill=response, alpha=confidence), ) +
+  geom_pointrange(aes(y=.epred, ymin=.lower, ymax=.upper)) +
+  scale_alpha_discrete(range=c(.25, 1)) +
+  facet_wrap(~ stimulus, labeller=label_both) +
+  theme_classic(18)
+
+## calculate mean confidence per stimulus
+epred_draws(g, tibble(.row=1)) |>
   group_by(.draw) |>
   mutate(stimulus=rep(0:1, each=n_distinct(d$confidence)*2)) |>
   group_by(stimulus, .draw) |>
@@ -76,6 +159,46 @@ epred_draws(m, tibble(.row=1)) |>
               group_by(stimulus) |>
               summarize(.true=sum(theta_1 * theta_2 * confidence)))
 
+
+## calculate mean confidence per stimulus
+tibble(.row=1) |>
+  add_mean_confidence_draws(g) |>
+  median_qi(.epred) |>
+  left_join(d |>
+              group_by(stimulus, response, confidence) |>
+              summarize(across(theta_1:theta_2, first)) |>
+              group_by(stimulus) |>
+              summarize(.true=sum(theta_1 * theta_2 * confidence)))
+
+
+# psuedo type-1 ROC
+tibble(.row=1) |>
+  add_roc1_draws(g, bounds=TRUE) |>
+  median_qi(p_fa, p_hit) |>
+  ggplot(aes(x=p_fa, xmin=p_fa.lower, xmax=p_fa.upper,
+             y=p_hit, ymin=p_hit.lower, ymax=p_hit.upper)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm)') + ylab('P(Hit)') +
+  theme_bw(18)
+
+# type 2 ROC
+roc2_draws(g, tibble(.row=1), bounds=TRUE) |>
+  median_qi(p_hit2, p_fa2) |>
+  mutate(response=factor(response)) |>
+  ggplot(aes(x=p_fa2, xmin=p_fa2.lower, xmax=p_fa2.upper,
+             y=p_hit2, ymin=p_hit2.lower, ymax=p_hit2.upper,
+             color=response)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(Type 2 False Alarm)') + ylab('P(Type 2 Hit)') +
+  theme_bw(18)
 
 
 ################################################################################
@@ -135,25 +258,53 @@ predicted_draws(m, newdata=select(m$data, condition, N)) |>
   theme_classic(18)
 
 
-
 ## calculate mean confidence per stimulus
 d |>
   distinct(condition) |>
-  add_epred_draws(m) |>
-  group_by(condition, .draw) |>
-  mutate(stimulus=rep(0:1, each=n_distinct(d$confidence)*2)) |>
-  group_by(condition, stimulus, .draw) |>
-  summarize(.epred=list(.epred)) |>
-  mutate(.mean=map_dbl(.epred, `%*%`,
-                       c(n_distinct(d$confidence):1,
-                         1:(n_distinct(d$confidence))))) |>
-  median_qi(.mean) |>
+  add_mean_confidence_draws(m) |>
+  median_qi(.epred) |>
   left_join(d |>
               group_by(condition, stimulus, response, confidence) |>
               summarize(across(theta_1:theta_2, first)) |>
               group_by(condition, stimulus) |>
               summarize(.true=sum(theta_1 * theta_2 * confidence)))
 
+
+# psuedo type-1 ROC
+d |>
+  distinct(condition) |>
+  mutate(condition=factor(condition)) |>
+  add_roc1_draws(m, bounds=TRUE) |>
+  group_by(condition, .add=TRUE) |>
+  median_qi(p_fa, p_hit) |>
+  ggplot(aes(x=p_fa, xmin=p_fa.lower, xmax=p_fa.upper,
+             y=p_hit, ymin=p_hit.lower, ymax=p_hit.upper,
+             group=condition, color=condition)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm)') + ylab('P(Hit)') +
+  theme_bw(18)
+
+# type 2 ROC
+d |>
+  distinct(condition) |>
+  mutate(condition=factor(condition)) |>
+  add_roc2_draws(m, bounds=TRUE) |>
+  median_qi(p_hit2, p_fa2) |>
+  mutate(response=factor(response)) |>
+  ggplot(aes(x=p_fa2, xmin=p_fa2.lower, xmax=p_fa2.upper,
+             y=p_hit2, ymin=p_hit2.lower, ymax=p_hit2.upper,
+             color=response, linetype=condition)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(Type 2 False Alarm)') + ylab('P(Type 2 Hit)') +
+  theme_bw(18)
 
 
 ################################################################################
@@ -217,6 +368,58 @@ predicted_draws(m, newdata=select(m$data, condition, N)) |>
                   position=position_dodge(1)) +
   facet_grid( ~ stimulus) +
   theme_classic(18)
+
+
+## calculate mean confidence per stimulus
+d |>
+  distinct(condition) |>
+  add_mean_confidence_draws(m) |>
+  median_qi(.epred) |>
+  left_join(d |>
+              group_by(condition, stimulus, response, confidence) |>
+              summarize(across(theta_1:theta_2, first)) |>
+              group_by(condition, stimulus) |>
+              summarize(.true=sum(theta_1 * theta_2 * confidence)))
+
+
+# psuedo type-1 ROC
+d |>
+  distinct(condition) |>
+  mutate(condition=factor(condition)) |>
+  add_roc1_draws(m, bounds=FALSE) |>
+  group_by(condition, .add=TRUE) |>
+  median_qi(p_fa, p_hit) |>
+  ggplot(aes(x=p_fa, xmin=p_fa.lower, xmax=p_fa.upper,
+             y=p_hit, ymin=p_hit.lower, ymax=p_hit.upper,
+             group=condition, color=condition)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  geom_point() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm)') + ylab('P(Hit)') +
+  theme_bw()
+
+# type 2 ROC
+d |>
+  distinct(condition) |>
+  mutate(condition=factor(condition)) |>
+  add_roc2_draws(m) |>
+  median_qi(p_hit2, p_fa2) |>
+  mutate(response=factor(response)) |>
+  ggplot(aes(x=p_fa2, xmin=p_fa2.lower, xmax=p_fa2.upper,
+             y=p_hit2, ymin=p_hit2.lower, ymax=p_hit2.upper,
+             color=response, linetype=condition)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  geom_point() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(Type 2 False Alarm)') + ylab('P(Type 2 Hit)') +
+  theme_bw(18)
+
 
 
 ## fit a model without fixed effects to test main effect
@@ -333,27 +536,69 @@ d |>
 ## calculate mean confidence per stimulus
 d |>
   distinct(participant) |>
-  add_epred_draws(m, ndraws=500) |>
-  group_by(participant, .draw) |>
-  mutate(stimulus=rep(0:1, each=n_distinct(d$confidence)*2)) |>
-  group_by(participant, stimulus, .draw) |>
-  summarize(.epred=list(.epred)) |>
-  mutate(.mean=map_dbl(.epred, `%*%`,
-                       c(n_distinct(d$confidence):1,
-                         1:(n_distinct(d$confidence))))) |>
-  median_qi(.mean) |>
+  add_mean_confidence_draws(m) |>
+  median_qi(.epred) |>
   left_join(d |>
               group_by(participant, stimulus, response, confidence) |>
               summarize(across(theta_1:theta_2, first)) |>
               group_by(participant, stimulus) |>
               summarize(.true=sum(theta_1 * theta_2 * confidence))) |>
   mutate(stimulus=factor(stimulus)) |>
-  ggplot(aes(x=.true, y=.mean, ymin=.lower, ymax=.upper, color=stimulus)) +
+  ggplot(aes(x=.true, y=.epred, ymin=.lower, ymax=.upper, color=stimulus)) +
   geom_abline(linetype='dashed', slope=1, intercept=0) +
   geom_pointrange() +
   facet_wrap(stimulus ~ ., labeller=label_both) +
   coord_fixed(xlim=c(1, 4), ylim=c(1, 4)) +
   theme_bw()
+
+
+# psuedo type-1 ROC
+tibble(.row=1) |>
+  add_roc1_draws(m, re_formula=NA) |>
+  median_qi(p_fa, p_hit) |>
+  ggplot(aes(x=p_fa, xmin=p_fa.lower, xmax=p_fa.upper,
+             y=p_hit, ymin=p_hit.lower, ymax=p_hit.upper)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_line(aes(x=p_fa, y=p_hit, group=participant),
+            alpha=.1, inherit.aes=FALSE,
+            data=d |>
+              distinct(participant) |>
+              mutate(participant=factor(participant)) |>
+              add_roc1_draws(m) |>
+              group_by(participant, .add=TRUE) |>
+              median_qi(p_fa, p_hit)) +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm)') + ylab('P(Hit)') +
+  theme_bw()
+
+
+# type 2 ROC
+tibble(.row=1) |>
+  add_roc2_draws(m, re_formula=NA) |>
+  median_qi(p_hit2, p_fa2) |>
+  mutate(response=factor(response)) |>
+  ggplot(aes(x=p_fa2, xmin=p_fa2.lower, xmax=p_fa2.upper,
+             y=p_hit2, ymin=p_hit2.lower, ymax=p_hit2.upper)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_line(aes(x=p_fa2, y=p_hit2, group=participant),
+            alpha=.1, inherit.aes=FALSE,
+            data=d |>
+              distinct(participant) |>
+              mutate(participant=factor(participant)) |>
+              add_roc2_draws(m) |>
+              group_by(participant, .add=TRUE) |>
+              median_qi(p_fa2, p_hit2)) +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  geom_point() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(Type 2 False Alarm)') + ylab('P(Type 2 Hit)') +
+  facet_wrap(~ response, labeller=label_both) +
+  theme_bw(18)
 
 
 

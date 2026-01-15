@@ -76,3 +76,45 @@ ggplot(draws, aes(x=.value)) +
           axis.ticks.y=element_blank(),
           axis.text.y=element_blank())
 ggsave('../plots/metad_condition/recovery.png', width=8, height=6)
+
+
+# pseudo-type 1 ROC
+fit |>
+  spread_draws(ROC_1[condition, k, stimulus]) |>
+  mutate(stimulus=stimulus-1,
+         condition=factor(condition)) |>
+  pivot_wider(names_from=stimulus, values_from=ROC_1, names_prefix='p_') |>
+  median_qi(p_0, p_1) |>
+  ggplot(aes(x=p_0, xmin=p_0.lower, xmax=p_0.upper,
+             y=p_1, ymin=p_1.lower, ymax=p_1.upper,
+             color=condition)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  geom_point() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm)') + ylab('P(Hit)') +
+  theme_bw(18)
+
+# pseudo-type 2 ROC
+fit |>
+  spread_draws(ROC_2[condition, response, k, accuracy]) |>
+  mutate(response=factor(response-1),
+         accuracy=accuracy-1,
+         condition=factor(condition)) |>
+  pivot_wider(names_from=accuracy, values_from=ROC_2,
+              names_prefix='p_') |>
+  median_qi(p_0, p_1) |>
+  ggplot(aes(x=p_0, xmin=p_0.lower, xmax=p_0.upper,
+             y=p_1, ymin=p_1.lower, ymax=p_1.upper,
+             color=response, linetype=condition)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  geom_point() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(Type 2 False Alarm)') + ylab('P(Type 2 Hit)') +
+  theme_bw(18)
+

@@ -6,7 +6,7 @@ library(mvtnorm)
 source('metad_utils.R')
 
 ## simulate an SDT agent for N trials
-d <- sim_sdt(N_trials=10000, d_prime=1, c=0, log_M=0)
+d <- sim_sdt(N_trials=100000, d_prime=1, c=0, log_M=0)
 
 
 ## format data for stan
@@ -26,7 +26,8 @@ m <- cmdstan_model('../stan/metad.stan')
 
 prior <- m$sample(c(data.simulated.stan, prior_only=TRUE), chains=4, parallel_chains=4, init=0)
 
-fit <- m$sample(c(data.simulated.stan, prior_only=FALSE), chains=4, parallel_chains=4, init=0)
+fit <- m$sample(c(data.simulated.stan, prior_only=FALSE),
+                chains=4, parallel_chains=4, init=0)
 
 fit$summary(c('d_prime', 'c', 'M', 'meta_c2_0', 'meta_c2_1')) %>%
     print(., n=nrow(.))
@@ -46,7 +47,8 @@ draws <- d %>%
               meta_c2_1_2=first(meta_c2_1)[2],
               meta_c2_0_3=first(meta_c2_0)[3],
               meta_c2_1_3=first(meta_c2_1)[3]) %>%
-    pivot_longer(d_prime:meta_c2_1_3, names_to='.variable', values_to='.true_value') %>%
+  pivot_longer(d_prime:meta_c2_1_3, names_to='.variable',
+               values_to='.true_value') %>%
     right_join(fit %>%
               gather_draws(d_prime, c, M, meta_c2_0[k], meta_c2_1[k]) %>%
               mutate(.value=ifelse(.variable=='M', log(.value), .value),
@@ -68,3 +70,41 @@ ggplot(draws, aes(x=.value)) +
           axis.ticks.y=element_blank(),
           axis.text.y=element_blank())
 ggsave('../plots/metad/recovery.png', width=8, height=8)
+
+
+# pseudo-type 1 ROC
+fit |>
+  spread_draws(ROC_1[k, stimulus]) |>
+  mutate(stimulus=stimulus-1) |>
+  pivot_wider(names_from=stimulus, values_from=ROC_1, names_prefix='p_') |>
+  median_qi(p_0, p_1) |>
+  ggplot(aes(x=p_0, xmin=p_0.lower, xmax=p_0.upper,
+             y=p_1, ymin=p_1.lower, ymax=p_1.upper)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  geom_point() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm)') + ylab('P(Hit)') +
+  theme_bw()
+
+# pseudo-type 2 ROC
+fit |>
+  spread_draws(ROC_2[response, k, accuracy]) |>
+  mutate(response=response-1,
+         accuracy=accuracy-1) |>
+  pivot_wider(names_from=accuracy, values_from=ROC_2,
+              names_prefix='p_') |>
+  median_qi(p_0, p_1) |>
+  ggplot(aes(x=p_0, xmin=p_0.lower, xmax=p_0.upper,
+             y=p_1, ymin=p_1.lower, ymax=p_1.upper)) +
+  geom_abline(slope=1, intercept=0, linetype='dashed') +
+  geom_errorbar(orientation='y', width=.01) +
+  geom_errorbar(orientation='x', width=.01) +
+  geom_line() +
+  geom_point() +
+  coord_fixed(xlim=0:1, ylim=0:1, expand=FALSE) +
+  xlab('P(False Alarm 2)') + ylab('P(Hit 2)') +
+  theme_bw()
+
