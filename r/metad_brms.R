@@ -12,9 +12,10 @@ source('metad_brms_utils.R')
 ################################################################################
 #                          Basic metad' model
 ################################################################################
-d <- sim_sdt(N_trials=100000, d_prime=1, c=0, log_M=0, c2_0=c(.5, 1), c2_1=c(.5, 1))
+d <- sim_sdt(N_trials=100000, d_prime=1, c=1, log_M=-1,
+             c2_0=c(.5, 1), c2_1=c(.5, 1))
 
-m <- fit_metad(bf(M ~ 0 + Intercept), data=d,
+m <- fit_metad(bf(N ~ 0 + Intercept), data=d,
                cores=4, backend='cmdstanr',
                prior=prior(normal(0, 1)) +
                  prior(normal(0, 1), class=dprime) +
@@ -25,7 +26,8 @@ m <- fit_metad(bf(M ~ 0 + Intercept), data=d,
                  prior(lognormal(0, 1), class=metac2one2diff))
 summary(m, prior=TRUE)
 
-predicted_draws(m, newdata=metad_aggregate(d)) |>
+## posterior predictions (counts of type 1/type 2 responses)
+predicted_draws(m, metad_aggregate(d)) |>
   group_by(.row, .category) |>
   median_qi(.prediction) |>
   mutate(N=as.integer(m$data$N)) |>
@@ -42,7 +44,7 @@ predicted_draws(m, newdata=metad_aggregate(d)) |>
   facet_wrap(~ stimulus, labeller=label_both) +
   theme_classic(18)
 
-
+## posterior predictions (probabilities of type 1/type 2 responses)
 epred_draws(m, newdata=tibble(.row=1)) |>
   group_by(.row, .category) |>
   median_qi(.epred) |>
@@ -59,8 +61,6 @@ epred_draws(m, newdata=tibble(.row=1)) |>
   facet_wrap(~ stimulus, labeller=label_both) +
   theme_classic(18)
 
-
-
 ## calculate mean confidence per stimulus
 tibble(.row=1) |>
   add_mean_confidence_draws(m) |>
@@ -73,7 +73,7 @@ tibble(.row=1) |>
 
 # psuedo type-1 ROC
 tibble(.row=1) |>
-  add_roc1_draws(m, bounds=TRUE) |>
+  add_roc1_draws(m, bounds=FALSE) |>
   median_qi(p_fa, p_hit) |>
   ggplot(aes(x=p_fa, xmin=p_fa.lower, xmax=p_fa.upper,
              y=p_hit, ymin=p_hit.lower, ymax=p_hit.upper)) +
@@ -101,6 +101,11 @@ tibble(.row=1) |>
   xlab('P(Type 2 False Alarm)') + ylab('P(Type 2 Hit)') +
   theme_bw(18)
 
+# model parameters
+tibble(.row=1) |>
+  add_linpred_draws(m, dpar=TRUE, transform=TRUE) |>
+  mutate(meta_dprime=mu * dprime,
+         across(starts_with('metac2'), ~ . / meta_dprime))
 
 ################################################################################
 #                    Basic meta-d' model w/ Gumbel-min noise

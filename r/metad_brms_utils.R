@@ -1,24 +1,20 @@
-## generate a custom brms family for K confidence levels
-metad <- function(K) {
+#' Generate Stan code for the meta-d' model
+#'
+#' @param K The number of confidence levels
+#' @param distribution The noise distribution to use. Should be a parameter-free
+#' distribution, i.e., one that is mean-centered without additional variance/shape parameters.
+#' If the distribution is not already available in stan, you must additionally provide two
+#' functions to Stan (one for `<distribution>_lcdf` and one for `<distribution>_lccdf`).
+#' @param metac_fixed Should the type 2 criterion (metac) be fixed to the type 1 criterion (c)?
+#' If `TRUE`, the model will set `metac = c`. Otherwise, it will set `metac = M * c`, such that
+#' the type 2 criterion is _relatively_ equal to the type 1 criterion
+#' (i.e., `meta_c/meta_d_prime = c/d_prime`)
+#' @returns A single string containing Stan code defining the likelihood for the metad' model
+#' with `K` confidence levels, signal distributed according to the distribution `distribution`,
+#' and where metac = c if metac_fixed is true, and metac = M*c otherwise.
+metad_lpdf <- function(K, distribution='std_normal', metac_fixed=TRUE) {
   k <- K-1
-  custom_family(
-    name='metad', 
-    dpars=c('mu', 'dprime', 'c', paste0('metac2zero', 1:k, 'diff'),
-            paste0('metac2one', 1:k, 'diff')),
-    links=c('log', 'identity', 'identity',
-            rep('log', 2*k)),
-    lb=c(0, NA,  NA, rep(0, 2*k)),
-    type='int',
-    specials=c('multinomial'),
-    log_lik=log_lik_metad,
-    posterior_predict=posterior_predict_metad,
-    posterior_epred=posterior_epred_metad)
-}
-
-## write out the stan code for the log likelihood
-metad_lpdf <- function(K, distribution='std_normal') {
-  k <- K-1
-
+  
   paste0("	// Convert a binary int x from {0, 1} to {-1, 1}
 	int to_signed(int x) {
 	  return 2*x - 1;
@@ -61,14 +57,15 @@ metad_lpdf <- function(K, distribution='std_normal') {
 	  return exp(log_theta);
 	}
 
-	real metad_lpmf(array[] int Y, real M, real d_prime, real c, ",
+	real metad__", K, "__", distribution, "__", ifelse(metac_fixed, 'fixed', 'relative'),
+  "_lpmf(array[] int Y, real M, real d_prime, real c, ",
   paste0("real z_meta_c2_0_", 1:k, collapse=", "), ", ",
   paste0("real z_meta_c2_1_", 1:k, collapse=", "),
   ") {
 		int K = size(Y) %/% 4; // number of confidence levels
 
 		real meta_d_prime = M * d_prime;
-		real meta_c = M * c;
+		real meta_c = ", ifelse(metac_fixed, 'c', 'M * c'), ";
 		vector[K-1] meta_c2_0 = meta_c - cumulative_sum([",
   paste0("z_meta_c2_0_", 1:k, collapse=", "),
   "]');
@@ -84,6 +81,13 @@ metad_lpdf <- function(K, distribution='std_normal') {
 	}")
 }
 
+#' Generate posterior predictions for the metad' model
+#' @param prep an object containing the data and model draws
+#' @returns A [D x N x K*4] array containing posterior samples of
+#' the joint probability of a type 1/type 2 response,
+#' where D is the number of posterior draws,
+#' N is the number of rows in the data, and
+#' K is the number of confidence levels.
 posterior_epred_metad <- function(prep) {
   post_M <- brms::get_dpar(prep, 'mu')
   post_d_prime <- brms::get_dpar(prep, 'dprime')
@@ -157,6 +161,11 @@ posterior_epred_metad <- function(prep) {
   p
 }
 
+#' Calculate the log probability of the metad' model
+#' @param i an observation index
+#' @param prep an object containing the data and model draws
+#' @returns A vector of joint type 1/type 2 response probabilties
+#' for observation `i` in `prep`
 lp_metad <- function(i, prep) {
   post_M <- brms::get_dpar(prep, 'mu', i = i)
   post_d_prime <- brms::get_dpar(prep, 'dprime', i = i)
@@ -189,6 +198,14 @@ lp_metad <- function(i, prep) {
   t(rbind(lp_0, lp_1))
 }
 
+#' Calculate the log likelihood of the metad' model
+#' @param i an observation index
+#' @param prep an object containing the data and model draws
+#' @returns A [D x K*4] array containing posterior samples of
+#' the joint probability of a type 1/type 2 response,
+#' where D is the number of posterior draws,
+#' N is the number of rows in the data, and
+#' K is the number of confidence levels.
 log_lik_metad <- function(i, prep) {
   p <- exp(lp_metad(i, prep))
 
@@ -209,9 +226,18 @@ log_lik_metad <- function(i, prep) {
                                    size=N_1, prob=prob, log=TRUE))
 }
 
+#' Simulate posterior predictions from the metad' model
+#' @param i an observation index
+#' @param prep an object containing the data and model draws
+#' @returns A [D x K*4] array containing posterior samples of
+#' counts of joint type 1/type 2 responses,
+#' where D is the number of posterior draws,
+#' N is the number of rows in the data, and
+#' K is the number of confidence levels.
 posterior_predict_metad <- function(i, prep, ...) {
   p <- exp(lp_metad(i, prep))
 
+  prep <<- prep
   if (any(is.na(prep$data$Y))) {
     stop('Error: please provide sample data y with trial counts')
   }
@@ -226,24 +252,44 @@ posterior_predict_metad <- function(i, prep, ...) {
     t()
 }
 
-#' metad_aggregate(data, ..., .response='y'):
-#'   Aggregate `data` by columns `response`, `confidence`,
-#'   and any other variables in `...`.
+#' Generate a brms family for the metad' model with K confidence levels
+#' @param K The number of confidence levels
+#' @param distribution The noise distribution to use for the signal detection model
+#' @param metac_fixed If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
+#' Otherwise, equate the criteria relatively such that metac/metadprime = c/dprime.
+#' @returns A brms family for the metad' model with K confidence levels
+metad <- function(K, distribution='std_normal', metac_fixed=TRUE) {
+  k <- K-1
+  custom_family(
+    name=paste0('metad__', K, '__', distribution, '__',
+                ifelse(metac_fixed, 'fixed', 'relative')), 
+    dpars=c('mu', 'dprime', 'c',
+            paste0('metac2zero', 1:k, 'diff'),
+            paste0('metac2one', 1:k, 'diff')),
+    links=c('log', 'identity', 'identity',
+            rep('log', 2*k)),
+    lb=c(0, NA,  NA, rep(0, 2*k)),
+    type='int',
+    specials=c('multinomial'),
+    log_lik=log_lik_metad,
+    posterior_predict=posterior_predict_metad,
+    posterior_epred=posterior_epred_metad)
+}
+
+#' Aggregate `data` by columns `response`, `confidence`,
+#' and any other variables in `...`.
 #'
-#'   Arguments:
-#'     `data`: the tibble to aggregate
-#'     `...`: grouping columns in the tibble
-#'     `.response`: the name of the column containing trial counts
-#'
-#'   Value:
-#'     A tibble with one row per combination of the variables in `...`,
-#'     and another column named by the value of `.response` containing trial counts.
-#'     For K confidence levels, this will be an N x K*4 matrix, such that the
-#'     columns represent:
-#'    [N(stimulus==0, confidence==K), ..., N(stimulus==0, confidence==1),
-#'     N(stimulus==0, confidence==1), ..., N(stimulus==0, confidence==K),
-#'     N(stimulus==1, confidence==K), ..., N(stimulus==1, confidence==1),
-#'     N(stimulus==1, confidence==1), ..., N(stimulus==1, confidence==K)]
+#' @param data the tibble to aggregate
+#' @param ... grouping columns in the tibble
+#' @param .response the name of the column containing trial counts
+#' @returns A tibble with one row per combination of the variables in `...`,
+#' and another column named by the value of `.response` containing trial counts.
+#' For K confidence levels, this will be an N x K*4 matrix, such that the
+#' columns represent:
+#' [N(stimulus==0, confidence==K), ..., N(stimulus==0, confidence==1),
+#'  N(stimulus==0, confidence==1), ..., N(stimulus==0, confidence==K),
+#'  N(stimulus==1, confidence==K), ..., N(stimulus==1, confidence==1),
+#'  N(stimulus==1, confidence==1), ..., N(stimulus==1, confidence==K)]
 metad_aggregate <- function(data, ..., .response='N') {
   # number of confidence levels
   K <- n_distinct(data$confidence)
@@ -270,9 +316,22 @@ metad_aggregate <- function(data, ..., .response='N') {
            as.matrix())
 }
 
-
+#' Fit the metad' model using the `brms` package
+#' @param formula A model formula for some or all parameters of the `metad` brms family.
+#' To display all parameter names for a model with `K` confidence levels, use `metad(K)`.
+#' @param data A tibble containing the data to fit the model. If `aggregate`==TRUE,
+#' `data` should have one row per observation. If `aggregate`==FALSE, it should be aggregated
+#' to have one row per cell of the design matrix, with joint
+#' type 1/type 2 response counts in a matrix column.
+#' @param ... Additional parameters passed to the `brm` function.
+#' @param aggregate If `TRUE`, automatically aggregate `data` by the variables included in `formula`. Otherwise, `data` should already be aggregated.
+#' @param distribution The noise distribution to use for the signal detection model
+#' @param metac_fixed If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
+#' Otherwise, equate the criteria relatively such that metac/metadprime = c/dprime.
+#' @param stanvars Additional `stanvars` to pass to the model code, for example to define an alternative
+#' distribution or a custom model prior.
 fit_metad <- function(formula, data, ..., aggregate=TRUE,
-                      distribution='std_normal', stanvars=NULL) {
+                      distribution='std_normal', metac_fixed=TRUE, stanvars=NULL) {
   K <- NULL
   data.aggregated <- NULL
 
@@ -293,16 +352,24 @@ fit_metad <- function(formula, data, ..., aggregate=TRUE,
   }
 
   # add metad stanvars to any user-defined stanvars
-  sv <- stanvar(scode=metad_lpdf(K, distribution=distribution), block='functions')
+  sv <- stanvar(scode=metad_lpdf(K, distribution=distribution, metac_fixed=metac_fixed), block='functions')
   if (!is.null(stanvars))
     sv <- sv + stanvars
   
-  brm(formula, data.aggregated, family=metad(K), stanvars=sv, ...)
+  brm(formula, data.aggregated,
+      family=metad(K, distribution=distribution, metac_fixed=metac_fixed),
+      stanvars=sv, ...)
 }
 
-
-
-
+#' Obtain posterior draws of mean confidence separately for each possible stimulus
+#' @param object the `brms` model with the `metad` family
+#' @param newdata Data frame from which to generate posterior predictions
+#' @returns a tibble containing posterior draws of mean confidence with the following
+#' columns:
+#'   .row: the row of `newdata`
+#'   .chain, .iteration, .draw: identifiers for the posterior sample
+#'   stimulus: indicator for stimulus presence
+#'   .epred: the predicted mean confidence
 mean_confidence_draws <- function(object, newdata, ...) {
   draws <- epred_draws(object, newdata, ...)
 
@@ -313,7 +380,6 @@ mean_confidence_draws <- function(object, newdata, ...) {
   .cols <- names(newdata)
   .cols <- .cols[!(.cols %in% c('.row', 'stimulus', '.draw'))]
   
-  
   draws |>
     mutate(.category=as.integer(.category),
            stimulus=as.integer(.category > 2*K),
@@ -321,17 +387,37 @@ mean_confidence_draws <- function(object, newdata, ...) {
            response=as.integer(joint_response > K),
            confidence=ifelse(joint_response > K,
                              joint_response - K, K + 1 - joint_response)) |>
-    group_by(.row, stimulus, !!!syms(.cols), .draw) |>
-    summarize(.epred=sum(.epred*confidence))
+    group_by(.row, .chain, .iteration, .draw, stimulus, !!!syms(.cols)) |>
+    summarize(.epred=sum(.epred*confidence),
+              .groups='keep') |>
+    group_by(.row, stimulus, !!!syms(.cols))
 }
 
+#' Obtain posterior draws of mean confidence separately for each possible stimulus
+#' @param newdata Data frame from which to generate posterior predictions
+#' @param object the `brms` model with the `metad` family
+#' @returns a tibble containing posterior draws of mean confidence with the following
+#' columns:
+#'   .row: the row of `newdata`
+#'   .chain, .iteration, .draw: identifiers for the posterior sample
+#'   stimulus: indicator for stimulus presence
+#'   .epred: the predicted mean confidence
 add_mean_confidence_draws <- function(newdata, object, ...) {
   mean_confidence_draws(object, newdata, ...)
 }
 
-
-
-
+#' Obtain posterior draws of the pseudo type 1 receiver operating characteristic (ROC) curve.
+#' @param object the `brms` model with the `metad` family
+#' @param newdata Data frame from which to generate posterior predictions
+#' @returns a tibble containing posterior draws of the pseudo type 1 ROC with the following
+#' columns:
+#'   .row: the row of `newdata`
+#'   .chain, .iteration, .draw: identifiers for the posterior sample
+#'   joint_response: the combined type 1 / type 2 response (in 1:2*K for K confidence levels)
+#'   response: the type 1 response for perceived stimulus presence
+#'   confidence: the type 2 confidence response
+#'   p_fa: the cumulative probability of a 'present'/'old' response for stimulus==0
+#'   p_hit: the cumulative probability of a 'present'/'old' response for stimulus==1
 roc1_draws <- function(object, newdata, ..., bounds=FALSE) {
   draws <- epred_draws(object=object, newdata=newdata, ...)
 
@@ -374,10 +460,33 @@ roc1_draws <- function(object, newdata, ..., bounds=FALSE) {
   draws
 }
 
+#' Obtain posterior draws of the pseudo type 1 receiver operating characteristic (ROC) curve.
+#' @param newdata Data frame from which to generate posterior predictions
+#' @param object the `brms` model with the `metad` family
+#' @returns a tibble containing posterior draws of the pseudo type 1 ROC with the following
+#' columns:
+#'   .row: the row of `newdata`
+#'   .chain, .iteration, .draw: identifiers for the posterior sample
+#'   joint_response: the combined type 1 / type 2 response (in 1:2*K for K confidence levels)
+#'   response: the type 1 response for perceived stimulus presence
+#'   confidence: the type 2 confidence response
+#'   p_fa: the cumulative probability of a 'present'/'old' response for stimulus==0
+#'   p_hit: the cumulative probability of a 'present'/'old' response for stimulus==1
 add_roc1_draws <- function(newdata, object, ..., bounds=FALSE) {
   roc1_draws(object, newdata, ..., bounds=bounds)
 }
 
+#' Obtain posterior draws of the response-specific type 2 receiver operating characteristic (ROC) curves.
+#' @param object the `brms` model with the `metad` family
+#' @param newdata Data frame from which to generate posterior predictions
+#' @returns a tibble containing posterior draws of the response-specific type 2 ROCs with the following
+#' columns:
+#'   .row: the row of `newdata`
+#'   .chain, .iteration, .draw: identifiers for the posterior sample
+#'   response: the type 1 response for perceived stimulus presence
+#'   confidence: the type 2 confidence response
+#'   p_fa2: the cumulative probability of an incorrect but confident response
+#'   p_hit2: the cumulative probability of a correct and confident response
 roc2_draws <- function(object, newdata, ..., bounds=FALSE) {
   draws <- epred_draws(object=object, newdata=newdata, ...)
 
@@ -422,6 +531,17 @@ roc2_draws <- function(object, newdata, ..., bounds=FALSE) {
   draws
 }
 
+#' Obtain posterior draws of the response-specific type 2 receiver operating characteristic (ROC) curves.
+#' @param newdata Data frame from which to generate posterior predictions
+#' @param object the `brms` model with the `metad` family
+#' @returns a tibble containing posterior draws of the response-specific type 2 ROCs with the following
+#' columns:
+#'   .row: the row of `newdata`
+#'   .chain, .iteration, .draw: identifiers for the posterior sample
+#'   response: the type 1 response for perceived stimulus presence
+#'   confidence: the type 2 confidence response
+#'   p_fa2: the cumulative probability of an incorrect but confident response
+#'   p_hit2: the cumulative probability of a correct and confident response
 add_roc2_draws <- function(newdata, object, ..., bounds=FALSE) {
   roc2_draws(object, newdata, ..., bounds=bounds)
 }
