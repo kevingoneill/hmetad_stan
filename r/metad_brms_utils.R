@@ -5,14 +5,14 @@
 #' distribution, i.e., one that is mean-centered without additional variance/shape parameters.
 #' If the distribution is not already available in stan, you must additionally provide two
 #' functions to Stan (one for `<distribution>_lcdf` and one for `<distribution>_lccdf`).
-#' @param metac_fixed Should the type 2 criterion (metac) be fixed to the type 1 criterion (c)?
+#' @param metac_absolute Should the type 2 criterion (metac) be fixed to the absolute type 1 criterion (c)?
 #' If `TRUE`, the model will set `metac = c`. Otherwise, it will set `metac = M * c`, such that
 #' the type 2 criterion is _relatively_ equal to the type 1 criterion
 #' (i.e., `meta_c/meta_d_prime = c/d_prime`)
 #' @returns A single string containing Stan code defining the likelihood for the metad' model
 #' with `K` confidence levels, signal distributed according to the distribution `distribution`,
-#' and where metac = c if metac_fixed is true, and metac = M*c otherwise.
-metad_lpdf <- function(K, distribution='std_normal', metac_fixed=TRUE) {
+#' and where metac = c if metac_absolute is true, and metac = M*c otherwise.
+metad_lpdf <- function(K, distribution='std_normal', metac_absolute=TRUE) {
   k <- K-1
   
   paste0("	// Convert a binary int x from {0, 1} to {-1, 1}
@@ -57,7 +57,7 @@ metad_lpdf <- function(K, distribution='std_normal', metac_fixed=TRUE) {
 	  return exp(log_theta);
 	}
 
-	real metad__", K, "__", distribution, "__", ifelse(metac_fixed, 'fixed', 'relative'),
+	real metad__", K, "__", distribution, "__", ifelse(metac_absolute, 'absolute', 'relative'),
   "_lpmf(array[] int Y, real M, real d_prime, real c, ",
   paste0("real z_meta_c2_0_", 1:k, collapse=", "), ", ",
   paste0("real z_meta_c2_1_", 1:k, collapse=", "),
@@ -65,7 +65,7 @@ metad_lpdf <- function(K, distribution='std_normal', metac_fixed=TRUE) {
 		int K = size(Y) %/% 4; // number of confidence levels
 
 		real meta_d_prime = M * d_prime;
-		real meta_c = ", ifelse(metac_fixed, 'c', 'M * c'), ";
+		real meta_c = ", ifelse(metac_absolute, 'c', 'M * c'), ";
 		vector[K-1] meta_c2_0 = meta_c - cumulative_sum([",
   paste0("z_meta_c2_0_", 1:k, collapse=", "),
   "]');
@@ -83,117 +83,126 @@ metad_lpdf <- function(K, distribution='std_normal', metac_fixed=TRUE) {
 
 #' Generate posterior predictions for the metad' model
 #' @param prep an object containing the data and model draws
+#' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
 #' @returns A [D x N x K*4] array containing posterior samples of
 #' the joint probability of a type 1/type 2 response,
 #' where D is the number of posterior draws,
 #' N is the number of rows in the data, and
 #' K is the number of confidence levels.
-posterior_epred_metad <- function(prep) {
-  post_M <- brms::get_dpar(prep, 'mu')
-  post_d_prime <- brms::get_dpar(prep, 'dprime')
-  post_c <- brms::get_dpar(prep, 'c')
-  
-  # align dimensions
-  n_obs <- dim(post_M)[2]
-  if (is.vector(post_d_prime))
-    post_d_prime <- replicate(n_obs, post_d_prime)
-  if (is.vector(post_c))
-    post_c <- replicate(n_obs, post_c)
-  post_meta_d_prime <- post_M * post_d_prime
-  post_meta_c <- post_M * post_c
-  
-  # determine confidence thresholds
-  dpars <- names(prep$dpars)
-  post_meta_c2_0 <- NULL
-  post_meta_c2_1 <- NULL
+posterior_epred_metad <- function(metac_absolute=TRUE) {
+  function(prep) {
+    M <- brms::get_dpar(prep, 'mu')
+    d_prime <- brms::get_dpar(prep, 'dprime')
+    c1 <- brms::get_dpar(prep, 'c')
+    
+    # align dimensions
+    n_obs <- dim(M)[2]
+    if (is.vector(d_prime))
+      d_prime <- replicate(n_obs, d_prime)
+    if (is.vector(c1))
+      c1 <- replicate(n_obs, c1)
+    meta_d_prime <- M * d_prime
+    meta_c <- NULL
+    if (metac_absolute)
+      meta_c <- c1
+    else
+      meta_c <- M * c1
+    
+    # determine confidence thresholds
+    dpars <- names(prep$dpars)
+    meta_c2_0 <- NULL
+    meta_c2_1 <- NULL
 
-  if (is.vector(brms::get_dpar(prep, 'metac2zero1diff'))) {
-    post_meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
-      sapply(function(s) brms::get_dpar(prep, s)) |>
-      apply(1, cumsum) |>
-      t() |>
-      replicate(last(dim(post_meta_c)), expr=_) |>
-      aperm(c(1, 3, 2))
-  } else {
-    post_meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
-      lapply(function(s) brms::get_dpar(prep, s)) |>
-      abind(along=3) |>
-      apply(1:2, cumsum) |>
-      aperm(c(2, 3, 1))
-  }
-
-  if (is.vector(brms::get_dpar(prep, 'metac2one1diff'))) {
-    post_meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
-      sapply(function(s) brms::get_dpar(prep, s)) |>
-      apply(1, cumsum) |>
-      t() |>
-      replicate(last(dim(post_meta_c)), expr=_) |>
-      aperm(c(1, 3, 2))
-  } else {    
-    post_meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
-      lapply(function(s) brms::get_dpar(prep, s)) |>
-      abind(along=3) |>
-      apply(1:2, cumsum) |>
-      aperm(c(2, 3, 1))
-  }
-  
-  # calculate number of confidence thresholds
-  k <- last(dim(post_meta_c2_0))
-  K <- k+1
-  
-  # calculate confidence threhsolds
-  post_meta_c2_0 <- replicate(k, post_meta_c) - post_meta_c2_0
-  post_meta_c2_1 <- replicate(k, post_meta_c) + post_meta_c2_1
-  
-  # calculate joint response & confidence probabilities
-  p <- array(dim=c(dim(post_d_prime), 4*K))
-  for (s in 1:first(dim(post_d_prime))) {
-    for (i in 1:last(dim(post_d_prime))) {
-      p[s,i,1:(2*K)] <-
-        sdt_joint_pmf(0, post_d_prime[s,i], post_c[s,i], post_meta_d_prime[s,i],
-                      post_meta_c[s,i], post_meta_c2_0[s,i,], post_meta_c2_1[s,i,])
-      p[s,i,(2*K+1):(4*K)] <-
-        sdt_joint_pmf(1, post_d_prime[s,i], post_c[s,i], post_meta_d_prime[s,i],
-                      post_meta_c[s,i], post_meta_c2_0[s,i,], post_meta_c2_1[s,i,])
+    prep <<- prep
+    if (is.vector(brms::get_dpar(prep, 'metac2zero1diff'))) {
+      meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
+        sapply(function(s) brms::get_dpar(prep, s)) |>
+        apply(1, cumsum) |>
+        t() |>
+        replicate(last(dim(meta_c)), expr=_) |>
+        aperm(c(1, 3, 2))
+    } else {
+      meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
+        lapply(function(s) brms::get_dpar(prep, s)) |>
+        abind(along=3) |>
+        apply(1:2, cumsum) |>
+        aperm(c(2, 3, 1))
     }
-  }
 
-  p
+    if (is.vector(brms::get_dpar(prep, 'metac2one1diff'))) {
+      meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
+        sapply(function(s) brms::get_dpar(prep, s)) |>
+        apply(1, cumsum) |>
+        t() |>
+        replicate(last(dim(meta_c)), expr=_) |>
+        aperm(c(1, 3, 2))
+    } else {    
+      meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
+        lapply(function(s) brms::get_dpar(prep, s)) |>
+        abind(along=3) |>
+        apply(1:2, cumsum) |>
+        aperm(c(2, 3, 1))
+    }
+    
+    # calculate number of confidence thresholds
+    k <- last(dim(meta_c2_0))
+    K <- k+1
+    
+    # calculate confidence threhsolds
+    meta_c2_0 <- replicate(k, meta_c) - meta_c2_0
+    meta_c2_1 <- replicate(k, meta_c) + meta_c2_1
+    
+    # calculate joint response & confidence probabilities
+    p <- array(dim=c(dim(d_prime), 4*K))
+    for (s in 1:first(dim(d_prime))) {
+      for (i in 1:last(dim(d_prime))) {
+        p[s,i,1:(2*K)] <-
+          sdt_joint_pmf(0, d_prime[s,i], c1[s,i], meta_d_prime[s,i],
+                        meta_c[s,i], meta_c2_0[s,i,], meta_c2_1[s,i,])
+        p[s,i,(2*K+1):(4*K)] <-
+          sdt_joint_pmf(1, d_prime[s,i], c1[s,i], meta_d_prime[s,i],
+                        meta_c[s,i], meta_c2_0[s,i,], meta_c2_1[s,i,])
+      }
+    }
+
+    p
+  }
 }
 
-#' Calculate the log probability of the metad' model
+#' Calculate the log probability simplex of the metad' model
 #' @param i an observation index
 #' @param prep an object containing the data and model draws
+#' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
 #' @returns A vector of joint type 1/type 2 response probabilties
 #' for observation `i` in `prep`
-lp_metad <- function(i, prep) {
-  post_M <- brms::get_dpar(prep, 'mu', i = i)
-  post_d_prime <- brms::get_dpar(prep, 'dprime', i = i)
-  post_c <- brms::get_dpar(prep, 'c', i = i)
-  post_meta_d_prime <- post_M * post_d_prime
-  post_meta_c <- post_M * post_c
+lp_metad <- function(i, prep, metac_absolute=TRUE) {
+  M <- brms::get_dpar(prep, 'mu', i = i)
+  d_prime <- brms::get_dpar(prep, 'dprime', i = i)
+  c1 <- brms::get_dpar(prep, 'c', i = i)
+  meta_d_prime <- M * d_prime
+  meta_c <- ifelse(metac_absolute, c1, M * c1)
 
   # determine confidence thresholds
   dpars <- names(prep$dpars)
-  post_meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
+  meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
     sapply(function(s) brms::get_dpar(prep, s, i=i)) |>
     apply(1, cumsum) |>
     t()
-  post_meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
+  meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
     sapply(function(s) brms::get_dpar(prep, s, i=i)) |>
     apply(1, cumsum) |>
     t()
-  post_meta_c2_0 <- post_meta_c - post_meta_c2_0
-  post_meta_c2_1 <- post_meta_c + post_meta_c2_1
-  post_meta_c2_0 <- split(post_meta_c2_0, row(post_meta_c2_0))
-  post_meta_c2_1 <- split(post_meta_c2_1, row(post_meta_c2_1))
+  meta_c2_0 <- meta_c - meta_c2_0
+  meta_c2_1 <- meta_c + meta_c2_1
+  meta_c2_0 <- split(meta_c2_0, row(meta_c2_0))
+  meta_c2_1 <- split(meta_c2_1, row(meta_c2_1))
   
   # calculate joint response & confidence probabilities
   PMF <- Vectorize(sdt_joint_pmf)
-  lp_0 <- PMF(0, post_d_prime, post_c, post_meta_d_prime, post_meta_c,
-              post_meta_c2_0, post_meta_c2_1, log=TRUE)
-  lp_1 <- PMF(1, post_d_prime, post_c, post_meta_d_prime, post_meta_c,
-              post_meta_c2_0, post_meta_c2_1, log=TRUE)
+  lp_0 <- PMF(0, d_prime, c1, meta_d_prime, meta_c,
+              meta_c2_0, meta_c2_1, log=TRUE)
+  lp_1 <- PMF(1, d_prime, c1, meta_d_prime, meta_c,
+              meta_c2_0, meta_c2_1, log=TRUE)
 
   t(rbind(lp_0, lp_1))
 }
@@ -201,79 +210,82 @@ lp_metad <- function(i, prep) {
 #' Calculate the log likelihood of the metad' model
 #' @param i an observation index
 #' @param prep an object containing the data and model draws
+#' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
 #' @returns A [D x K*4] array containing posterior samples of
 #' the joint probability of a type 1/type 2 response,
 #' where D is the number of posterior draws,
 #' N is the number of rows in the data, and
 #' K is the number of confidence levels.
-log_lik_metad <- function(i, prep) {
-  p <- exp(lp_metad(i, prep))
+log_lik_metad <- function(metac_absolute=TRUE) {
+  function(i, prep) {
+    p <- exp(lp_metad(i, prep, metac_absolute=metac_absolute))
 
-  if (any(is.na(prep$data$Y))) {
-    stop('Error: please provide sample data y with trial counts')
+    if (any(is.na(prep$data$Y))) {
+      stop('Error: please provide sample data y with trial counts')
+    }
+    
+    y <- prep$data$Y[i,]
+    N_0 <- sum(y[1:(length(y)/2)])
+    N_1 <- sum(y[(length(y)/2+1):length(y)])
+
+    # calculate multinomial response probabilities
+    apply(p[,1:(ncol(p)/2)], 1,
+          function(prob) dmultinom(y[1:(length(y)/2)],
+                                   size=N_0, prob=prob, log=TRUE)) +
+      apply(p[,(ncol(p)/2+1):ncol(p)], 1,
+            function(prob) dmultinom(y[(length(y)/2+1):length(y)],
+                                     size=N_1, prob=prob, log=TRUE))
   }
-  
-  y <- prep$data$Y[i,]
-  N_0 <- sum(y[1:(length(y)/2)])
-  N_1 <- sum(y[(length(y)/2+1):length(y)])
-
-  # calculate multinomial response probabilities
-  apply(p[,1:(ncol(p)/2)], 1,
-        function(prob) dmultinom(y[1:(length(y)/2)],
-                                 size=N_0, prob=prob, log=TRUE)) +
-    apply(p[,(ncol(p)/2+1):ncol(p)], 1,
-          function(prob) dmultinom(y[(length(y)/2+1):length(y)],
-                                   size=N_1, prob=prob, log=TRUE))
 }
 
 #' Simulate posterior predictions from the metad' model
 #' @param i an observation index
 #' @param prep an object containing the data and model draws
+#' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
 #' @returns A [D x K*4] array containing posterior samples of
 #' counts of joint type 1/type 2 responses,
 #' where D is the number of posterior draws,
 #' N is the number of rows in the data, and
 #' K is the number of confidence levels.
-posterior_predict_metad <- function(i, prep, ...) {
-  p <- exp(lp_metad(i, prep))
+posterior_predict_metad <- function(metac_absolute=TRUE) {
+  function(i, prep, ...) {
+    p <- exp(lp_metad(i, prep, metac_absolute=metac_absolute))
 
-  prep <<- prep
-  if (any(is.na(prep$data$Y))) {
-    stop('Error: please provide sample data y with trial counts')
+    prep <<- prep
+    if (any(is.na(prep$data$Y))) {
+      stop('Error: please provide sample data y with trial counts')
+    }
+    
+    y <- prep$data$Y[i,]
+    N_0 <- sum(y[1:(length(y)/2)])
+    N_1 <- sum(y[(length(y)/2+1):length(y)])
+    
+    # simulate from a multinomial distribution
+    rbind(apply(p[,1:(ncol(p)/2)], 1, rmultinom, n=1, size=N_0),
+          apply(p[,(ncol(p)/2+1):ncol(p)], 1, rmultinom, n=1, size=N_1)) |>
+      t()
   }
-  
-  y <- prep$data$Y[i,]
-  N_0 <- sum(y[1:(length(y)/2)])
-  N_1 <- sum(y[(length(y)/2+1):length(y)])
-  
-  # simulate from a multinomial distribution
-  rbind(apply(p[,1:(ncol(p)/2)], 1, rmultinom, n=1, size=N_0),
-        apply(p[,(ncol(p)/2+1):ncol(p)], 1, rmultinom, n=1, size=N_1)) |>
-    t()
 }
 
 #' Generate a brms family for the metad' model with K confidence levels
 #' @param K The number of confidence levels
 #' @param distribution The noise distribution to use for the signal detection model
-#' @param metac_fixed If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
+#' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
 #' Otherwise, equate the criteria relatively such that metac/metadprime = c/dprime.
 #' @returns A brms family for the metad' model with K confidence levels
-metad <- function(K, distribution='std_normal', metac_fixed=TRUE) {
+metad <- function(K, distribution='std_normal', metac_absolute=TRUE) {
   k <- K-1
   custom_family(
     name=paste0('metad__', K, '__', distribution, '__',
-                ifelse(metac_fixed, 'fixed', 'relative')), 
-    dpars=c('mu', 'dprime', 'c',
-            paste0('metac2zero', 1:k, 'diff'),
+                ifelse(metac_absolute, 'absolute', 'relative')), 
+    dpars=c('mu', 'dprime', 'c', paste0('metac2zero', 1:k, 'diff'),
             paste0('metac2one', 1:k, 'diff')),
-    links=c('log', 'identity', 'identity',
-            rep('log', 2*k)),
+    links=c('log', 'identity', 'identity', rep('log', 2*k)),
     lb=c(0, NA,  NA, rep(0, 2*k)),
-    type='int',
-    specials=c('multinomial'),
-    log_lik=log_lik_metad,
-    posterior_predict=posterior_predict_metad,
-    posterior_epred=posterior_epred_metad)
+    type='int', specials=c('multinomial'),
+    log_lik=log_lik_metad(metac_absolute=metac_absolute),
+    posterior_predict=posterior_predict_metad(metac_absolute=metac_absolute),
+    posterior_epred=posterior_epred_metad(metac_absolute=metac_absolute))
 }
 
 #' Aggregate `data` by columns `response`, `confidence`,
@@ -326,12 +338,12 @@ metad_aggregate <- function(data, ..., .response='N') {
 #' @param ... Additional parameters passed to the `brm` function.
 #' @param aggregate If `TRUE`, automatically aggregate `data` by the variables included in `formula`. Otherwise, `data` should already be aggregated.
 #' @param distribution The noise distribution to use for the signal detection model
-#' @param metac_fixed If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
+#' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
 #' Otherwise, equate the criteria relatively such that metac/metadprime = c/dprime.
 #' @param stanvars Additional `stanvars` to pass to the model code, for example to define an alternative
 #' distribution or a custom model prior.
 fit_metad <- function(formula, data, ..., aggregate=TRUE,
-                      distribution='std_normal', metac_fixed=TRUE, stanvars=NULL) {
+                      distribution='std_normal', metac_absolute=TRUE, stanvars=NULL) {
   K <- NULL
   data.aggregated <- NULL
 
@@ -352,12 +364,12 @@ fit_metad <- function(formula, data, ..., aggregate=TRUE,
   }
 
   # add metad stanvars to any user-defined stanvars
-  sv <- stanvar(scode=metad_lpdf(K, distribution=distribution, metac_fixed=metac_fixed), block='functions')
+  sv <- stanvar(scode=metad_lpdf(K, distribution=distribution, metac_absolute=metac_absolute), block='functions')
   if (!is.null(stanvars))
     sv <- sv + stanvars
   
   brm(formula, data.aggregated,
-      family=metad(K, distribution=distribution, metac_fixed=metac_fixed),
+      family=metad(K, distribution=distribution, metac_absolute=metac_absolute),
       stanvars=sv, ...)
 }
 
