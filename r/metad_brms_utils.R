@@ -81,6 +81,47 @@ metad_lpdf <- function(K, distribution='std_normal', metac_absolute=TRUE) {
 	}")
 }
 
+#' Generate (log) probability simplex over the joint type 1/type 2 responses
+#' @param stimulus the stimulus (0 or 1)
+#' @param d_prime the type 1 sensitivity
+#' @param c the type 1 response criterion
+#' @param meta_d_prime the type 2 sensitivity
+#' @param meta_c the type 1 criteriom for generating confidence ratings
+#' @param meta_c2_0, meta_c2_1 the type 2 response criteria, conditional on type 1 response
+#' @param log if TRUE, return log probabilities instead of probabilities
+sdt_joint_pmf <- function(stimulus, d_prime, c,
+                          meta_d_prime, meta_c,
+                          meta_c2_0, meta_c2_1, log=FALSE) {
+  # number of confidence levels
+  K <- length(meta_c2_0) + 1
+  
+  # type-1 response probabilities
+  lp_1 <- pnorm(to_polar(stimulus)*d_prime/2 - c, log.p=TRUE)
+  lp_0 <- pnorm(to_polar(stimulus)*d_prime/2 - c, lower.tail=FALSE, log.p=TRUE)
+  
+  # calculate normal cdfs (log scale)
+  lp2_1 <- pnorm(to_polar(stimulus) * meta_d_prime/2 - c(meta_c, meta_c2_1), log.p=TRUE)
+  lp2_0 <- pnorm(-to_polar(stimulus) * meta_d_prime/2 + c(meta_c, meta_c2_0), log.p=TRUE)
+  
+  # response probabilities
+  log_theta <- rep(0, 2*K)
+  for (k in 1:(K-1)) {
+    log_theta[K-k+1] <- log(exp(lp2_0[k]) - exp(lp2_0[k+1]))
+    log_theta[K+k] <- log(exp(lp2_1[k]) - exp(lp2_1[k+1]))
+  }
+  log_theta[1] <- lp2_0[K]
+  log_theta[2*K] <- lp2_1[K]
+  
+  # weight by P(response|stimulus) and normalize
+  log_theta[1:K] <- log_theta[1:K] + lp_0 - lp2_0[1]
+  log_theta[(K+1):(2*K)] <- log_theta[(K+1):(2*K)] + lp_1 - lp2_1[1]
+
+  if (log)
+    log_theta
+  else
+    exp(log_theta)
+}
+
 #' Generate posterior predictions for the metad' model
 #' @param prep an object containing the data and model draws
 #' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.

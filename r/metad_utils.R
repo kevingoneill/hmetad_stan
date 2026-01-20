@@ -84,7 +84,7 @@ sdt_joint_pmf <- function(stimulus, d_prime, c,
 #'   Get a tibble of P(Hit) and P(FA) for varying levels of d' and c
 sdt_type1_ROC <- function(d_prime=1, c=0,
                           log_M=0, meta_c2=seq(-10, 10, by=.01)) {
-  expand_grid(d_prime=d_prime, c=c, log_M=log_M, meta_c2=meta_c2) %>%
+  expand_grid(d_prime=d_prime, c=c, log_M=log_M, meta_c2=meta_c2) |>
     mutate(meta_d_prime=exp(log_M)*d_prime,
            meta_c=exp(log_M)*c,
            p_hit=pmap_dbl(list(d_prime, c, meta_d_prime, meta_c, meta_c2),
@@ -108,64 +108,73 @@ sdt_type1_ROC <- function(d_prime=1, c=0,
 }
 
 
-#' sim_sdt(N_trials, d_prime, c, log_M, c2_0, c2_1, summarize):
+#' sim_metad(N_trials, d_prime, c, log_M, c2_0_diff, c2_1_diff, metac_absolute, summarize):
 #'   Simulate from the meta-d' model with sensitivity d_prime,
-#'   response bias c, metacognitive efficiency log_M, and positive ordered
-#'   confidence thresholds c2_0 and c2_1 (for the two responses).
+#'   response bias c, metacognitive efficiency log_M, and 
+#'   confidence threshold distances c2_0_diff and c2_1_diff (for the two responses).
 #'
 #'   Confidence thresholds are defined relative to meta-c, such that
-#'   meta_c2_0 = meta_c - c2_0 and meta_c2_1 = meta_c + c2_1.
+#'   meta_c2_0 = meta_c - cumsum(c2_0_diff) and meta_c2_1 = meta_c + cumsum(c2_1_diff).
+#'
+#'   If metac_absolute=TRUE, meta_c = c. Otherwise, meta_c = M * c.
 #' 
 #'   If summarize=FALSE, returns a dataset with one row per observation.
 #'   If summarize=TRUE, returns an aggregated dataset where `n` is the
 #'   number of observations per response, accuracy, and confidence level.
-sim_sdt <- function(N_trials=100, d_prime=1, c=0, log_M=0,
-                    c2_0=c(.5, 1, 1.5), c2_1=c(.5, 1, 1.5), summarize=FALSE) {
+sim_metad <- function(N_trials=100, d_prime=1, c=0, log_M=0,
+                      c2_0_diff=rep(.5, 3), c2_1_diff=rep(.5, 3),
+                      metac_absolute=TRUE, summarize=FALSE) {
   if (N_trials <= 0)
     stop("Error: `N_trials` must be greater than 0.")
   if (!all(length(d_prime)==1, length(c)==1, length(log_M)==1,
            is.numeric(d_prime), is.numeric(c), is.numeric(log_M)))
     stop("Error: `d_prime`, `c`, and `log_M` must be single numbers.")
-  if (!is.numeric(c2_0) || !is.numeric(c2_1) || length(c2_0) != length(c2_1) ||
-        !all(c2_0 > 0) || !all(c2_1 > 0) ||
-          !all(diff(c2_0) > 0) || !all(diff(c2_1) > 0))
-    stop("Error: c2_0 and c2_1 must be positive ordered vectors of the same length")
+  if (!is.numeric(c2_0_diff) || !is.numeric(c2_1_diff) ||
+        length(c2_0_diff) != length(c2_1_diff) ||
+        !all(c2_0_diff > 0) || !all(c2_1_diff > 0))
+    stop("Error: c2_0_diff and c2_1_diff must be positive vectors of the same length")
   
   M <- exp(log_M)
   meta_d_prime <- M * d_prime
-  meta_c <- M * c
-  meta_c2_0 <- meta_c - c2_0
-  meta_c2_1 <- meta_c + c2_1
+  meta_c <- NULL
+  if (metac_absolute) {
+    meta_c <- c
+  } else {
+    meta_c <- M * c
+  }
+  meta_c2_0 <- meta_c - cumsum(c2_0_diff)
+  meta_c2_1 <- meta_c + cumsum(c2_1_diff)
   
-  d <- expand_grid(stimulus=0:1) %>%
-    ## calculate type 1 responses conditional on stimulus
-    mutate(N=map(stimulus, ~ tibble(response=0:1,
-                                    theta_1=sdt_type1_pmf(., response=response, d_prime, c),
-                                    N=as.vector(rmultinom(1, N_trials/2, theta_1))))) %>%
-    unnest(N) %>%
-    ## calculate type 2 responses conditional on type 1 responses
-    mutate(correct=as.numeric(stimulus==response),
-           n=pmap(list(N, response, correct),
-                  function(n,r,c)
-                    tibble(confidence=1:(length(c2_0)+1),
-                           theta_2=sdt_type2_pmf(r, c, meta_d_prime, meta_c,
-                                                 meta_c2_0, meta_c2_1),
-                           n=as.vector(rmultinom(1, n, prob=theta_2))))) %>%
-    unnest(n) %>%
+  d <- expand_grid(stimulus=0:1, response=0:1, confidence=1:4) |>
+    mutate(correct=as.integer(stimulus==response),
+           joint_response=joint_response(response, confidence, K)) |>
+    arrange(stimulus, joint_response) |>
+    group_by(stimulus) |>
+    mutate(theta=sdt_joint_pmf(first(stimulus), d_prime, c, meta_d_prime,
+                               meta_c, meta_c2_0, meta_c2_1),
+           theta_1=sdt_type1_pmf(first(stimulus), response=response, d_prime, c),
+           theta_2=theta/theta_1,
+           n=as.vector(rmultinom(1, N_trials/2, theta))) |>
     mutate(d_prime=d_prime, c=c, meta_d_prime=meta_d_prime,
-           M=M, meta_c2_0=list(meta_c2_0), meta_c2_1=list(meta_c2_1)) %>%
+           M=M, meta_c2_0=list(meta_c2_0), meta_c2_1=list(meta_c2_1)) |>
     select(stimulus, response, correct, confidence, n, d_prime, c, meta_d_prime,
-           M, meta_c2_0, meta_c2_1, theta_1, theta_2)
+           M, meta_c2_0, meta_c2_1, theta, theta_1, theta_2) |>
+    arrange(stimulus, response, confidence)
   
   if (summarize) {
     d
   } else {
-    d %>%
-      uncount(n) %>%
-      mutate(trial=row_number()) %>%
+    d |>
+      uncount(n) |>
+      mutate(trial=row_number()) |>
       relocate(trial)
   }
 }
+
+
+
+
+
 
 #' cov_matrix(S, OMEGA):
 #'   Generate a covariance matrix from:
@@ -205,7 +214,7 @@ ordered_transform <- function(x) {
   apply(exp(x), MARGIN=2, cumsum)
 }
 
-#' sim_sdt_condition(N_trials, d_prime, c, log_M, c2_0, c2_1, summarize):
+#' sim_metad_condition(N_trials, d_prime, c, log_M, c2_0, c2_1, summarize):
 #'   Simulate a set of conditions from the meta-d' model with sensitivity d_prime,
 #'   response bias c, metacognitive efficiency log_M, and positive ordered
 #'   confidence thresholds c2_0 and c2_1 (for the two responses).
@@ -218,21 +227,21 @@ ordered_transform <- function(x) {
 #'   If summarize=FALSE, returns a dataset with one row per observation.
 #'   If summarize=TRUE, returns an aggregated dataset where `n` is the
 #'   number of observations per condition, response, accuracy, and confidence level.
-sim_sdt_condition <- function(N_trials=100, d_prime=rep(1, 2), c=rep(0, 2), log_M=rep(0, 2),
-                              c2_0=list(c(.5, 1, 1.5), c(.5, 1, 1.5)),
-                              c2_1=list(c(.5, 1, 1.5), c(.5, 1, 1.5)),
-                              summarize=FALSE) {
+sim_metad_condition <- function(N_trials=100, d_prime=rep(1, 2), c=rep(0, 2), log_M=rep(0, 2),
+                              c2_0_diff=list(rep(.5, 3), rep(.5, 3)),
+                              c2_1_diff=list(rep(.5, 3), rep(.5, 3)),
+                              metac_absolute=TRUE, summarize=FALSE) {
   tibble(condition=seq_along(d_prime),
          d_prime=d_prime, c=c, log_M=log_M,
-         c2_0=c2_0, c2_1=c2_1) %>%
-    mutate(data=pmap(list(d_prime, c, log_M, c2_0, c2_1), sim_sdt,
-                     N=N_trials, summarize=summarize)) %>%
-    select(condition, data) %>%
+         c2_0_diff=c2_0_diff, c2_1_diff=c2_1_diff) |>
+    mutate(data=pmap(list(d_prime, c, log_M, c2_0_diff, c2_1_diff), sim_metad,
+                     N=N_trials, summarize=summarize, metac_absolute=metac_absolute)) |>
+    select(condition, data) |>
     unnest(data)
 }
 
 
-#' sim_sdt_participant(N_participants, N_trials, mu_d_prime, sd_d_prime, mu_c, sd_c,
+#' sim_metad_participant(N_participants, N_trials, mu_d_prime, sd_d_prime, mu_c, sd_c,
 #'                     mu_log_M, sd_log_M, mu_z_c2, sd_z_c2, r_z_c2, summarize):
 #'   Simulate a set of participants from the meta-d' model with sensitivity d_prime,
 #'   response bias c, metacognitive efficiency log_M, and positive ordered
@@ -247,28 +256,28 @@ sim_sdt_condition <- function(N_trials=100, d_prime=rep(1, 2), c=rep(0, 2), log_
 #'   If summarize=FALSE, returns a dataset with one row per observation.
 #'   If summarize=TRUE, returns an aggregated dataset where `n` is the
 #'   number of observations per participant, response, accuracy, and confidence level.
-sim_sdt_participant <- function(N_participants=100, N_trials=100,
-                                mu_d_prime=1, sd_d_prime=.5, mu_c=0, sd_c=.5,
-                                mu_log_M=0, sd_log_M=.5,
-                                mu_z_c2=rep(-1, 3), sd_z_c2=rep(.1, 3), r_z_c2=diag(3),
-                                summarize=FALSE) {
-  expand_grid(participant=1:N_participants) %>%
+sim_metad_participant <- function(N_participants=100, N_trials=100,
+                                  mu_d_prime=1, sd_d_prime=.5, mu_c=0, sd_c=.5,
+                                  mu_log_M=0, sd_log_M=.5,
+                                  mu_z_c2=rep(-1, 3), sd_z_c2=rep(.1, 3), r_z_c2=diag(3),
+                                  metac_absolute=TRUE, summarize=FALSE) {
+  expand_grid(participant=1:N_participants) |>
     mutate(d_prime=rnorm(n(), mu_d_prime, sd_d_prime),
            c=rnorm(n(), mu_c, sd_c),
            log_M=rnorm(n(), mu_log_M, sd_log_M),
-           c2_0=map(participant,
-                    ~ ordered_transform(rmvnorm(1, mean=mu_z_c2,
-                                                sigma=cov_matrix(sd_z_c2, r_z_c2)))),
-           c2_1=map(participant,
-                    ~ ordered_transform(rmvnorm(1, mean=mu_z_c2,
-                                                sigma=cov_matrix(sd_z_c2, r_z_c2)))),
-           data=pmap(list(d_prime, c, log_M, c2_0, c2_1), sim_sdt,
-                     N=N_trials, summarize=summarize)) %>%
-    select(participant, data) %>%
+           c2_0_diff=map(participant,
+                         ~ exp(rmvnorm(1, mean=mu_z_c2,
+                                       sigma=cov_matrix(sd_z_c2, r_z_c2)))),
+           c2_1_diff=map(participant,
+                         ~ exp(rmvnorm(1, mean=mu_z_c2,
+                                       sigma=cov_matrix(sd_z_c2, r_z_c2)))),
+           data=pmap(list(d_prime, c, log_M, c2_0_diff, c2_1_diff), sim_metad,
+                     N=N_trials, metac_absolute=metac_absolute, summarize=summarize)) |>
+    select(participant, data) |>
     unnest(data)
 }
 
-#' sim_sdt_participant_condition(N_participants, N_trials, mu_d_prime, sd_d_prime, r_d_prime,
+#' sim_metad_participant_condition(N_participants, N_trials, mu_d_prime, sd_d_prime, r_d_prime,
 #'                     mu_c, sd_c, r_c, mu_log_M, sd_log_M, r_log_M,
 #'                     mu_z_c2, sd_z_c2, r_z_c2_condition, r_z_c2_confidence, summarize):
 #'   Simulate a set of participants over multiple within-participant conditions
@@ -288,14 +297,14 @@ sim_sdt_participant <- function(N_participants=100, N_trials=100,
 #'   If summarize=FALSE, returns a dataset with one row per observation.
 #'   If summarize=TRUE, returns an aggregated dataset where `n` is the
 #'   number of observations per participant, response, accuracy, and confidence level.
-sim_sdt_participant_condition <- function(N_participants=100, N_trials=100,
-                                          mu_d_prime=rep(1, 2), sd_d_prime=rep(.5, 2), r_d_prime=diag(2),
-                                          mu_c=rep(0, 2), sd_c=rep(.5, 2), r_c=diag(2),
-                                          mu_log_M=rep(0, 2), sd_log_M=rep(.5, 2), r_log_M=diag(2),
-                                          mu_z_c2=matrix(rep(-1, 6), nrow=3, ncol=2),
-                                          sd_z_c2_condition=rep(.1, 2), r_z_c2_condition=diag(2),
-                                          sd_z_c2_confidence=rep(.1, 3), r_z_c2_confidence=diag(3),
-                                          summarize=FALSE) {
+sim_metad_participant_condition <- function(N_participants=100, N_trials=100,
+                                            mu_d_prime=rep(1, 2), sd_d_prime=rep(.5, 2), r_d_prime=diag(2),
+                                            mu_c=rep(0, 2), sd_c=rep(.5, 2), r_c=diag(2),
+                                            mu_log_M=rep(0, 2), sd_log_M=rep(.5, 2), r_log_M=diag(2),
+                                            mu_z_c2=matrix(rep(-1, 6), nrow=3, ncol=2),
+                                            sd_z_c2_condition=rep(.1, 2), r_z_c2_condition=diag(2),
+                                            sd_z_c2_confidence=rep(.1, 3), r_z_c2_confidence=diag(3),
+                                            metac_absolute=TRUE, summarize=FALSE) {
   ## calculate covariance matrices
   sigma_d_prime <- cov_matrix(sd_d_prime, r_d_prime)
   sigma_c <- cov_matrix(sd_c, r_c)
@@ -304,26 +313,26 @@ sim_sdt_participant_condition <- function(N_participants=100, N_trials=100,
   L_sigma_z_c2_confidence <- chol(cov_matrix(sd_z_c2_confidence, r_z_c2_confidence))
 
   expand_grid(participant=1:N_participants,
-              condition=seq_along(mu_d_prime)) %>%
-    group_by(participant) %>%
+              condition=seq_along(mu_d_prime)) |>
+    group_by(participant) |>
     mutate(d_prime=map_dbl(condition, function(condition, d) d[,condition],
                            rmvnorm(1, mu_d_prime, sigma_d_prime)),
            c=map_dbl(condition, function(condition, c) c[,condition],
                      rmvnorm(1, mu_c, sigma_c)),
            log_M=map_dbl(condition, function(condition, log_m) log_m[,condition],
                          rmvnorm(1, mu_log_M, sigma_log_M)),
-           c2_0=map(condition, function(condition, c2) c2[,condition],
-                    ordered_transform(rmatrixnorm(mu_z_c2,
-                                                  L_sigma_z_c2_confidence,
-                                                  L_sigma_z_c2_condition))),
-           c2_1=map(condition, function(condition, c2) c2[,condition],
-                    ordered_transform(rmatrixnorm(mu_z_c2,
-                                                  L_sigma_z_c2_confidence,
-                                                  L_sigma_z_c2_condition)))) %>%
-    ungroup() %>%
-    mutate(data=pmap(list(d_prime, c, log_M, c2_0, c2_1),
-                     sim_sdt, N=N_trials, summarize=summarize)) %>%
-    select(participant, condition, data) %>%
+           c2_0_diff=map(condition, function(condition, c2) c2[,condition],
+                         exp(rmatrixnorm(mu_z_c2,
+                                         L_sigma_z_c2_confidence,
+                                         L_sigma_z_c2_condition))),
+           c2_1_diff=map(condition, function(condition, c2) c2[,condition],
+                         exp(rmatrixnorm(mu_z_c2,
+                                         L_sigma_z_c2_confidence,
+                                         L_sigma_z_c2_condition)))) |>
+    ungroup() |>
+    mutate(data=pmap(list(d_prime, c, log_M, c2_0_diff, c2_1_diff),
+                     sim_metad, N=N_trials, metac_absolute=metac_absolute, summarize=summarize)) |>
+    select(participant, condition, data) |>
     unnest(data)
 }
 

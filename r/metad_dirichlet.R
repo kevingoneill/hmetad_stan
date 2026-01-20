@@ -7,7 +7,7 @@ library(bayesplot)
 source('metad_utils.R')
 
 ## simulate an SDT agent for N trials
-d <- sim_sdt(N_trials=10000, d_prime=1, c=0, log_M=0)
+d <- sim_metad(N_trials=10000, d_prime=1, c=0, log_M=0)
 
 
 ## format data for stan

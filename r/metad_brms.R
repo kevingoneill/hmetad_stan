@@ -12,8 +12,8 @@ source('metad_brms_utils.R')
 ################################################################################
 #                          Basic metad' model
 ################################################################################
-d <- sim_sdt(N_trials=100000, d_prime=1, c=1, log_M=-1,
-             c2_0=c(.5, 1), c2_1=c(.5, 1))
+d <- sim_metad(N_trials=100000, d_prime=1, c=1, log_M=-1,
+               c2_0=c(.5, 1), c2_1=c(.5, 1))
 
 m <- fit_metad(bf(N ~ 0 + Intercept), data=d,
                cores=4, backend='cmdstanr',
@@ -209,9 +209,9 @@ roc2_draws(g, tibble(.row=1), bounds=TRUE) |>
 ################################################################################
 #                          Condition-level regression
 ################################################################################
-d <- sim_sdt_condition(N_trials=100000,
-                       d_prime=c(1, 2), c=c(-1, 1),
-                       log_M=c(-3/4, -1/3))
+d <- sim_metad_condition(N_trials=100000,
+                         d_prime=c(1, 2), c=c(-1, 1),
+                         log_M=c(-3/4, -1/3))
 
 m <- fit_metad(bf(N ~ 0 + Intercept + condition,
                   dprime+c ~ 0 + Intercept + condition),
@@ -315,13 +315,13 @@ d |>
 ################################################################################
 #       Condition-level regression (variable confidence threhsolds)
 ################################################################################
-d <- sim_sdt_condition(N_trials=100000,
-                       d_prime=c(1, 2), c=c(-1, 1),
-                       log_M=c(-3/4, -1/3),
-                       c2_0=list(c(.5, 1, 1.5),
-                                 c(.25, .5, .75)),
-                       c2_1=list(c(1/3, 2/3, 1),
-                                 c(1/3, 2/3, 1)))
+d <- sim_metad_condition(N_trials=100000,
+                         d_prime=c(1, 2), c=c(-1, 1),
+                         log_M=c(-3/4, -1/3),
+                         c2_0=list(c(.5, 1, 1.5),
+                                   c(.25, .5, .75)),
+                         c2_1=list(c(1/3, 2/3, 1),
+                                   c(1/3, 2/3, 1)))
 
 m <- fit_metad(bf(N ~ 0 + Intercept + condition,
                   dprime + c + metac2zero1diff + metac2zero2diff + metac2zero3diff +
@@ -475,12 +475,12 @@ if (file.exists('../data/data_participant.csv')) {
     mutate(meta_c2_0=map(meta_c2_0, ~ as.numeric(unlist(str_split(., '\\|')))),
            meta_c2_1=map(meta_c2_1, ~ as.numeric(unlist(str_split(., '\\|')))))
 } else {
-  d <- sim_sdt_participant(N_participants=100, N_trials=500,
-                           mu_d_prime=1, sd_d_prime=.5,
-                           mu_c=0, sd_c=.5,
-                           mu_log_M=0, sd_log_M=.5,
-                           mu_z_c2=rep(-1, 3), sd_z_c2=rep(.1, 3),
-                           r_z_c2=corr_matrix(.5, nrow=3))
+  d <- sim_metad_participant(N_participants=100, N_trials=500,
+                             mu_d_prime=1, sd_d_prime=.5,
+                             mu_c=0, sd_c=.5,
+                             mu_log_M=0, sd_log_M=.5,
+                             mu_z_c2=rep(-1, 3), sd_z_c2=rep(.1, 3),
+                             r_z_c2=corr_matrix(.5, nrow=3))
   ## collapse list_cols to strings
   d |>
     mutate(meta_c2_0=map_chr(meta_c2_0, str_flatten, collapse='|'),
@@ -616,7 +616,7 @@ if (file.exists('../data/data_participant_condition.csv')) {
     mutate(meta_c2_0=map(meta_c2_0, ~ as.numeric(unlist(str_split(., '\\|')))),
            meta_c2_1=map(meta_c2_1, ~ as.numeric(unlist(str_split(., '\\|')))))
 } else {
-  d <- sim_sdt_participant_condition(
+  d <- sim_metad_participant_condition(
     N_participants=100, N_trials=500,
     mu_d_prime=rep(1, 2), sd_d_prime=rep(.5, 2), r_d_prime=corr_matrix(.5),
     mu_c=rep(0, 2), sd_c=rep(.5, 2), r_c=corr_matrix(.25),
