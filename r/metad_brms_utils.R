@@ -113,14 +113,18 @@ posterior_epred_metad <- function(metac_absolute=TRUE) {
     meta_c2_0 <- NULL
     meta_c2_1 <- NULL
 
-    prep <<- prep
     if (is.vector(brms::get_dpar(prep, 'metac2zero1diff'))) {
-      meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
-        sapply(function(s) brms::get_dpar(prep, s)) |>
-        apply(1, cumsum) |>
-        t() |>
-        replicate(last(dim(meta_c)), expr=_) |>
-        aperm(c(1, 3, 2))
+      if (length(dpars[str_detect(dpars, 'metac2zero')]) == 1) {
+        meta_c2_0 <- brms::get_dpar(prep, 'metac2zero1diff')
+        meta_c2_0 <- array(meta_c2_0, dim=c(length(meta_c2_0), 1, 1))
+      } else {
+        meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
+          sapply(function(s) brms::get_dpar(prep, s)) |>
+          apply(1, cumsum) |>
+          t() |>
+          replicate(last(dim(meta_c)), expr=_) |>
+          aperm(c(1, 3, 2))
+      }
     } else {
       meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
         lapply(function(s) brms::get_dpar(prep, s)) |>
@@ -130,12 +134,17 @@ posterior_epred_metad <- function(metac_absolute=TRUE) {
     }
 
     if (is.vector(brms::get_dpar(prep, 'metac2one1diff'))) {
-      meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
-        sapply(function(s) brms::get_dpar(prep, s)) |>
-        apply(1, cumsum) |>
-        t() |>
-        replicate(last(dim(meta_c)), expr=_) |>
-        aperm(c(1, 3, 2))
+      if (length(dpars[str_detect(dpars, 'metac2one')]) == 1) {
+        meta_c2_1 <- brms::get_dpar(prep, 'metac2one1diff')
+        meta_c2_1 <- array(meta_c2_1, dim=c(length(meta_c2_1), 1, 1))
+      } else {
+        meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
+          sapply(function(s) brms::get_dpar(prep, s)) |>
+          apply(1, cumsum) |>
+          t() |>
+          replicate(last(dim(meta_c)), expr=_) |>
+          aperm(c(1, 3, 2))
+      }
     } else {    
       meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
         lapply(function(s) brms::get_dpar(prep, s)) |>
@@ -180,16 +189,27 @@ lp_metad <- function(i, prep, metac_absolute=TRUE) {
   d_prime <- brms::get_dpar(prep, 'dprime', i = i)
   c1 <- brms::get_dpar(prep, 'c', i = i)
   meta_d_prime <- M * d_prime
-  meta_c <- ifelse(metac_absolute, c1, M * c1)
+  meta_c <- NULL
+  if (metac_absolute) {
+    meta_c <- c1
+  } else {
+    meta_c <- M * c1
+  }
 
   # determine confidence thresholds
   dpars <- names(prep$dpars)
   meta_c2_0 <- dpars[str_detect(dpars, 'metac2zero')] |>
-    sapply(function(s) brms::get_dpar(prep, s, i=i)) |>
+    sapply(function(s) brms::get_dpar(prep, s, i=i))
+  if (is.vector(meta_c2_0))
+    meta_c2_0 <- matrix(meta_c2_0, ncol=length(meta_c2_0))
+  meta_c2_0 <- meta_c2_0 |>
     apply(1, cumsum) |>
     t()
   meta_c2_1 <- dpars[str_detect(dpars, 'metac2one')] |>
-    sapply(function(s) brms::get_dpar(prep, s, i=i)) |>
+    sapply(function(s) brms::get_dpar(prep, s, i=i))
+  if (is.vector(meta_c2_1))
+    meta_c2_1 <- matrix(meta_c2_1, ncol=length(meta_c2_1))
+  meta_c2_1 <- meta_c2_1 |>
     apply(1, cumsum) |>
     t()
   meta_c2_0 <- meta_c - meta_c2_0
@@ -229,10 +249,10 @@ log_lik_metad <- function(metac_absolute=TRUE) {
     N_1 <- sum(y[(length(y)/2+1):length(y)])
 
     # calculate multinomial response probabilities
-    apply(p[,1:(ncol(p)/2)], 1,
+    apply(p[,1:(ncol(p)/2), drop=FALSE], 1,
           function(prob) dmultinom(y[1:(length(y)/2)],
                                    size=N_0, prob=prob, log=TRUE)) +
-      apply(p[,(ncol(p)/2+1):ncol(p)], 1,
+      apply(p[,(ncol(p)/2+1):ncol(p), drop=FALSE], 1,
             function(prob) dmultinom(y[(length(y)/2+1):length(y)],
                                      size=N_1, prob=prob, log=TRUE))
   }
@@ -251,18 +271,17 @@ posterior_predict_metad <- function(metac_absolute=TRUE) {
   function(i, prep, ...) {
     p <- exp(lp_metad(i, prep, metac_absolute=metac_absolute))
 
-    prep <<- prep
     if (any(is.na(prep$data$Y))) {
       stop('Error: please provide sample data y with trial counts')
     }
     
     y <- prep$data$Y[i,]
-    N_0 <- sum(y[1:(length(y)/2)])
-    N_1 <- sum(y[(length(y)/2+1):length(y)])
+    N_0 <- as.integer(sum(y[1:(length(y)/2)]))
+    N_1 <- as.integer(sum(y[(length(y)/2+1):length(y)]))
     
     # simulate from a multinomial distribution
-    rbind(apply(p[,1:(ncol(p)/2)], 1, rmultinom, n=1, size=N_0),
-          apply(p[,(ncol(p)/2+1):ncol(p)], 1, rmultinom, n=1, size=N_1)) |>
+    rbind(apply(p[,1:(ncol(p)/2), drop=FALSE], 1, rmultinom, n=1, size=N_0),
+          apply(p[,(ncol(p)/2+1):ncol(p), drop=FALSE], 1, rmultinom, n=1, size=N_1)) |>
       t()
   }
 }
@@ -302,16 +321,29 @@ metad <- function(K, distribution='std_normal', metac_absolute=TRUE) {
 #'  N(stimulus==0, confidence==1), ..., N(stimulus==0, confidence==K),
 #'  N(stimulus==1, confidence==K), ..., N(stimulus==1, confidence==1),
 #'  N(stimulus==1, confidence==1), ..., N(stimulus==1, confidence==K)]
-metad_aggregate <- function(data, ..., .response='N') {
+metad_aggregate <- function(data, ..., .response='N', K=NULL) {
   # number of confidence levels
-  K <- n_distinct(data$confidence)
+  if (is.null(K))
+    K <- n_distinct(data$confidence)
+
+  ## aggregate data if non-empty
+  if (nrow(data) == 0) {
+    data <- expand_grid(..., stimulus=0:1, response=0:1, confidence=1:K) |>
+      mutate(joint_response=factor(joint_response(response, confidence, K)),
+             n=0) |>
+      select(-response, -confidence) |>
+      arrange(..., stimulus, joint_response)
+  } else {
+    data <- data |>
+      mutate(joint_response=factor(joint_response(response, confidence, K),
+                                   levels=1:(2*K)),
+             stimulus=factor(stimulus),
+             across(c(...), factor)) |>
+      group_by(...) |>
+      count(stimulus, joint_response, .drop=FALSE)
+  }
 
   data <- data |>
-    mutate(joint_response=factor(joint_response(response, confidence, K)),
-           stimulus=factor(stimulus),
-           across(c(...), factor)) |>
-    group_by(...) |>
-    count(stimulus, joint_response, .drop=FALSE) |>
     pivot_wider(names_from=c(stimulus, joint_response),
                 values_from=n, names_prefix=glue::glue('{.response}_')) %>%
     mutate('{.response}_0' := sum(c_across(starts_with(glue::glue('{.response}_0_'),
@@ -336,15 +368,15 @@ metad_aggregate <- function(data, ..., .response='N') {
 #' to have one row per cell of the design matrix, with joint
 #' type 1/type 2 response counts in a matrix column.
 #' @param ... Additional parameters passed to the `brm` function.
-#' @param aggregate If `TRUE`, automatically aggregate `data` by the variables included in `formula`. Otherwise, `data` should already be aggregated.
+#' @param aggregate If `TRUE`, automatically aggregate `data` by the variables included in `formula`.
+#' Otherwise, `data` should already be aggregated.
 #' @param distribution The noise distribution to use for the signal detection model
 #' @param metac_absolute If `TRUE`, fix the type 2 criterion to be equal to the type 1 criterion.
 #' Otherwise, equate the criteria relatively such that metac/metadprime = c/dprime.
 #' @param stanvars Additional `stanvars` to pass to the model code, for example to define an alternative
 #' distribution or a custom model prior.
-fit_metad <- function(formula, data, ..., aggregate=TRUE,
+fit_metad <- function(formula, data, ..., aggregate=TRUE, K=NULL,
                       distribution='std_normal', metac_absolute=TRUE, stanvars=NULL) {
-  K <- NULL
   data.aggregated <- NULL
 
   # determine response variable
@@ -352,16 +384,21 @@ fit_metad <- function(formula, data, ..., aggregate=TRUE,
   
   # aggregate data by formula terms
   if (aggregate) {
-    K <- n_distinct(data$confidence)
+    if (is.null(K))
+      K <- n_distinct(data$confidence)
     
     # get a list of variables by which to aggregate
     terms <- all.vars(brmsterms(bf(formula, family=metad(K)))$allvars)
     terms <- syms(terms[!(terms %in% c(.response, 'Intercept'))])
     data.aggregated <- metad_aggregate(data, !!!terms, .response=.response)
   } else {
-    K <- ncol(pull(data, .response)) / 4
+    if (is.null(K))
+      K <- ncol(pull(data, .response)) / 4
     data.aggregated <- data
   }
+
+  if (K < 2)
+    stop(glue::glue('Error: must have at least one confidence level (found {{K}}).'))
 
   # add metad stanvars to any user-defined stanvars
   sv <- stanvar(scode=metad_lpdf(K, distribution=distribution, metac_absolute=metac_absolute), block='functions')
