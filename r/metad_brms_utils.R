@@ -81,6 +81,15 @@ metad_lpdf <- function(K, distribution='std_normal', metac_absolute=TRUE) {
 	}")
 }
 
+#' to_signed(x):
+#'   convert binary x from {0, 1} to {-1, 1}
+to_signed <- function(x) 2*x-1
+
+#' to_unsigned(x):
+#'   convert binary x from {-1, 1} to {1, 1}
+to_unsigned <- function(x) as.integer((x+1)/2)
+
+
 #' Generate (log) probability simplex over the joint type 1/type 2 responses
 #' @param stimulus the stimulus (0 or 1)
 #' @param d_prime the type 1 sensitivity
@@ -96,12 +105,12 @@ sdt_joint_pmf <- function(stimulus, d_prime, c,
   K <- length(meta_c2_0) + 1
   
   # type-1 response probabilities
-  lp_1 <- pnorm(to_polar(stimulus)*d_prime/2 - c, log.p=TRUE)
-  lp_0 <- pnorm(to_polar(stimulus)*d_prime/2 - c, lower.tail=FALSE, log.p=TRUE)
+  lp_1 <- pnorm(to_signed(stimulus)*d_prime/2 - c, log.p=TRUE)
+  lp_0 <- pnorm(to_signed(stimulus)*d_prime/2 - c, lower.tail=FALSE, log.p=TRUE)
   
   # calculate normal cdfs (log scale)
-  lp2_1 <- pnorm(to_polar(stimulus) * meta_d_prime/2 - c(meta_c, meta_c2_1), log.p=TRUE)
-  lp2_0 <- pnorm(-to_polar(stimulus) * meta_d_prime/2 + c(meta_c, meta_c2_0), log.p=TRUE)
+  lp2_1 <- pnorm(to_signed(stimulus) * meta_d_prime/2 - c(meta_c, meta_c2_1), log.p=TRUE)
+  lp2_0 <- pnorm(-to_signed(stimulus) * meta_d_prime/2 + c(meta_c, meta_c2_0), log.p=TRUE)
   
   # response probabilities
   log_theta <- rep(0, 2*K)
@@ -348,6 +357,17 @@ metad <- function(K, distribution='std_normal', metac_absolute=TRUE) {
     posterior_epred=posterior_epred_metad(metac_absolute=metac_absolute))
 }
 
+#' Convert a type 1 response (0 or 1) and a corresponding confidence level
+#' (between 1 and K) into a joint response between 1 and 2*K, with outer
+#' values reflecting confident responses and intermediate values reflecting
+#' uncertainty.
+#' @param response type 1 response (0 or 1)
+#' @param confidence type 2 response/confidence rating (1:K)
+#' @param K maximum confidence level
+joint_response <- function(response, confidence, K) {
+  ifelse(response, confidence+K, K+1-confidence)
+}
+
 #' Aggregate `data` by columns `response`, `confidence`,
 #' and any other variables in `...`.
 #'
@@ -376,7 +396,9 @@ metad_aggregate <- function(data, ..., .response='N', K=NULL) {
       arrange(..., stimulus, joint_response)
   } else {
     data <- data |>
-      mutate(joint_response=factor(joint_response(response, confidence, K),
+      mutate(response=as.integer(as.character(response)),
+             confidence=as.integer(as.character(confidence)),
+             joint_response=factor(joint_response(response, confidence, K),
                                    levels=1:(2*K)),
              stimulus=factor(stimulus),
              across(c(...), factor)) |>
@@ -454,13 +476,16 @@ fit_metad <- function(formula, data, ..., aggregate=TRUE, K=NULL,
 #' Obtain posterior draws of mean confidence separately for each possible stimulus
 #' @param object the `brms` model with the `metad` family
 #' @param newdata Data frame from which to generate posterior predictions
+#' @param ... Additional arguments to tidybayes::epred_draws
+#' @param by_stimulus If TRUE, predict mean confidence separately by stimulus.
+#' Otherwise, predict mean confidence averaging across stimuli.
 #' @returns a tibble containing posterior draws of mean confidence with the following
 #' columns:
 #'   .row: the row of `newdata`
 #'   .chain, .iteration, .draw: identifiers for the posterior sample
 #'   stimulus: indicator for stimulus presence
 #'   .epred: the predicted mean confidence
-mean_confidence_draws <- function(object, newdata, ...) {
+mean_confidence_draws <- function(object, newdata, ..., by_stimulus=TRUE) {
   draws <- epred_draws(object, newdata, ...)
 
   ## number of confidence levels
@@ -470,17 +495,26 @@ mean_confidence_draws <- function(object, newdata, ...) {
   .cols <- names(newdata)
   .cols <- .cols[!(.cols %in% c('.row', 'stimulus', '.draw'))]
   
-  draws |>
+  d <- draws |>
     mutate(.category=as.integer(.category),
            stimulus=as.integer(.category > 2*K),
            joint_response=ifelse(stimulus, .category - 2*K, .category),
            response=as.integer(joint_response > K),
            confidence=ifelse(joint_response > K,
-                             joint_response - K, K + 1 - joint_response)) |>
-    group_by(.row, .chain, .iteration, .draw, stimulus, !!!syms(.cols)) |>
-    summarize(.epred=sum(.epred*confidence),
-              .groups='keep') |>
-    group_by(.row, stimulus, !!!syms(.cols))
+                             joint_response - K, K + 1 - joint_response))
+
+  if (by_stimulus) {
+    d |>
+      group_by(.row, .chain, .iteration, .draw, stimulus, !!!syms(.cols)) |>
+      summarize(.epred=sum(.epred*confidence),
+                .groups='keep') |>
+      group_by(.row, stimulus, !!!syms(.cols))
+  } else {
+    d |> group_by(.row, .chain, .iteration, .draw, !!!syms(.cols)) |>
+      summarize(.epred=sum(.epred*confidence)/2,
+                .groups='keep') |>
+      group_by(.row, !!!syms(.cols))
+  }
 }
 
 #' Obtain posterior draws of mean confidence separately for each possible stimulus
@@ -492,7 +526,7 @@ mean_confidence_draws <- function(object, newdata, ...) {
 #'   .chain, .iteration, .draw: identifiers for the posterior sample
 #'   stimulus: indicator for stimulus presence
 #'   .epred: the predicted mean confidence
-add_mean_confidence_draws <- function(newdata, object, ...) {
+add_mean_confidence_draws <- function(newdata, object, ...) {x
   mean_confidence_draws(object, newdata, ...)
 }
 
@@ -635,3 +669,40 @@ roc2_draws <- function(object, newdata, ..., bounds=FALSE) {
 add_roc2_draws <- function(newdata, object, ..., bounds=FALSE) {
   roc2_draws(object, newdata, ..., bounds=bounds)
 }
+
+
+metacognitive_bias <- function(...) {
+  k <- length(c(...))
+  sum(c(...) * (k:1)/k)
+}
+
+metacognitive_bias_draws <- function(object, newdata, ..., by_stimulus=TRUE) {
+  dpar <- object$family$dpar[str_starts(object$family$dpar, 'metac2')]
+  draws <- linpred_draws(object, newdata, ..., dpar=dpar, transform=TRUE)
+
+  ## grouping columns
+  .cols <- names(newdata)
+  .cols <- .cols[!(.cols %in% c('.row', '.draw'))]
+  
+  draws <- draws |>
+    group_by(!!!.cols) |>
+    select(.draw, !!!.cols, starts_with('metac2')) |>
+    pivot_longer(starts_with('metac2'), names_to=c('response', 'confidence'),
+                 names_pattern='metac2([[:alpha:]]*)([[:digit:]])diff') |>
+    mutate(response=as.integer(response=='zero')) |>
+    group_by(!!!.cols, response, .draw) |>
+    summarize(metacognitive_bias=metacognitive_bias(value))
+
+  if (!by_stimulus) {
+    draws <- draws |>
+      group_by(!!!.cols, .draw) |>
+      summarize(metacognitive_bias=mean(metacognitive_bias))
+  }
+
+  draws
+}
+
+add_metacognitive_bias_draws <- function(newdata, object, ..., by_stimulus=TRUE) {
+  metacognitive_bias_draws(object, newdata, ..., by_stimulus=by_stimulus)
+}
+

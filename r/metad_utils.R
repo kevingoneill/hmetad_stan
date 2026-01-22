@@ -1,12 +1,12 @@
-#' to_polar(x):
+#' to_signed(x):
 #'   convert binary x from {0, 1} to {-1, 1}
-to_polar <- function(x) 2*x-1
+to_signed <- function(x) 2*x-1
 
 #' type1_pmf(stimulus, response, d_prime, c):
 #'   Determine the probability of `response` given `stimulus` for
 #'   a signal detection agent with sensitivity `d_prime` and bias `c`.
 sdt_type1_pmf <- function(stimulus, response, d_prime, c) {
-  pnorm(to_polar(response) * (to_polar(stimulus)*d_prime/2 - c))
+  pnorm(to_signed(response) * (to_signed(stimulus)*d_prime/2 - c))
 }
 
 #' type2_pmf(response, accuracy, meta_d_prime, meta_c, meta_c2_0, meta_c2_1):
@@ -18,7 +18,7 @@ sdt_type1_pmf <- function(stimulus, response, d_prime, c) {
 #' 
 sdt_type2_pmf <- function(response, accuracy, meta_d_prime, meta_c, meta_c2_0, meta_c2_1) {
   ## mean of signal distribution
-  mu <- to_polar(accuracy) * meta_d_prime / 2
+  mu <- to_signed(accuracy) * meta_d_prime / 2
 
   ## thresholds
   K <- length(meta_c2_0) + 1
@@ -52,12 +52,12 @@ sdt_joint_pmf <- function(stimulus, d_prime, c,
   K <- length(meta_c2_0) + 1
   
   # type-1 response probabilities
-  lp_1 <- pnorm(to_polar(stimulus)*d_prime/2 - c, log.p=TRUE)
-  lp_0 <- pnorm(to_polar(stimulus)*d_prime/2 - c, lower.tail=FALSE, log.p=TRUE)
+  lp_1 <- pnorm(to_signed(stimulus)*d_prime/2 - c, log.p=TRUE)
+  lp_0 <- pnorm(to_signed(stimulus)*d_prime/2 - c, lower.tail=FALSE, log.p=TRUE)
   
   # calculate normal cdfs (log scale)
-  lp2_1 <- pnorm(to_polar(stimulus) * meta_d_prime/2 - c(meta_c, meta_c2_1), log.p=TRUE)
-  lp2_0 <- pnorm(-to_polar(stimulus) * meta_d_prime/2 + c(meta_c, meta_c2_0), log.p=TRUE)
+  lp2_1 <- pnorm(to_signed(stimulus) * meta_d_prime/2 - c(meta_c, meta_c2_1), log.p=TRUE)
+  lp2_0 <- pnorm(-to_signed(stimulus) * meta_d_prime/2 + c(meta_c, meta_c2_0), log.p=TRUE)
   
   # response probabilities
   log_theta <- rep(0, 2*K)
@@ -145,7 +145,7 @@ sim_metad <- function(N_trials=100, d_prime=1, c=0, log_M=0,
   meta_c2_0 <- meta_c - cumsum(c2_0_diff)
   meta_c2_1 <- meta_c + cumsum(c2_1_diff)
   
-  d <- expand_grid(stimulus=0:1, response=0:1, confidence=1:4) |>
+  d <- expand_grid(stimulus=0:1, response=0:1, confidence=1:(length(meta_c2_0)+1)) |>
     mutate(correct=as.integer(stimulus==response),
            joint_response=joint_response(response, confidence, K)) |>
     arrange(stimulus, joint_response) |>
