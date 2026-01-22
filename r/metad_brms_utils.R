@@ -526,7 +526,7 @@ mean_confidence_draws <- function(object, newdata, ..., by_stimulus=TRUE) {
 #'   .chain, .iteration, .draw: identifiers for the posterior sample
 #'   stimulus: indicator for stimulus presence
 #'   .epred: the predicted mean confidence
-add_mean_confidence_draws <- function(newdata, object, ...) {x
+add_mean_confidence_draws <- function(newdata, object, ...) {
   mean_confidence_draws(object, newdata, ...)
 }
 

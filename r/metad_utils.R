@@ -147,7 +147,7 @@ sim_metad <- function(N_trials=100, d_prime=1, c=0, log_M=0,
   
   d <- expand_grid(stimulus=0:1, response=0:1, confidence=1:(length(meta_c2_0)+1)) |>
     mutate(correct=as.integer(stimulus==response),
-           joint_response=joint_response(response, confidence, K)) |>
+           joint_response=joint_response(response, confidence, length(meta_c2_0)+1)) |>
     arrange(stimulus, joint_response) |>
     group_by(stimulus) |>
     mutate(theta=sdt_joint_pmf(first(stimulus), d_prime, c, meta_d_prime,
