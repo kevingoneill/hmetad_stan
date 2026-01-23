@@ -689,7 +689,7 @@ metacognitive_bias_draws <- function(object, newdata, ..., by_stimulus=TRUE) {
     select(.draw, !!!.cols, starts_with('metac2')) |>
     pivot_longer(starts_with('metac2'), names_to=c('response', 'confidence'),
                  names_pattern='metac2([[:alpha:]]*)([[:digit:]])diff') |>
-    mutate(response=as.integer(response=='zero')) |>
+    mutate(response=as.integer(response=='one')) |>
     group_by(!!!.cols, response, .draw) |>
     summarize(metacognitive_bias=metacognitive_bias(value))
 
