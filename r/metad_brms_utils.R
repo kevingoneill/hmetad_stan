@@ -477,7 +477,8 @@ fit_metad <- function(formula, data, ..., aggregate=TRUE, K=NULL,
 #' @param object the `brms` model with the `metad` family
 #' @param newdata Data frame from which to generate posterior predictions
 #' @param ... Additional arguments to tidybayes::epred_draws
-#' @param by_stimulus If TRUE, predict mean confidence separately by stimulus.
+#' @param by_stimulus If TRUE, predict mean confidence separately by stimulus
+#' @param by_response If TRUE, predict mean confidence separately by response
 #' Otherwise, predict mean confidence averaging across stimuli.
 #' @returns a tibble containing posterior draws of mean confidence with the following
 #' columns:
@@ -485,7 +486,7 @@ fit_metad <- function(formula, data, ..., aggregate=TRUE, K=NULL,
 #'   .chain, .iteration, .draw: identifiers for the posterior sample
 #'   stimulus: indicator for stimulus presence
 #'   .epred: the predicted mean confidence
-mean_confidence_draws <- function(object, newdata, ..., by_stimulus=TRUE) {
+mean_confidence_draws <- function(object, newdata, ..., by_stimulus=TRUE, by_response=TRUE) {
   draws <- epred_draws(object, newdata, ...)
 
   ## number of confidence levels
@@ -495,7 +496,7 @@ mean_confidence_draws <- function(object, newdata, ..., by_stimulus=TRUE) {
   .cols <- names(newdata)
   .cols <- .cols[!(.cols %in% c('.row', 'stimulus', '.draw'))]
   
-  d <- draws |>
+  draws <- draws |>
     mutate(.category=as.integer(.category),
            stimulus=as.integer(.category > 2*K),
            joint_response=ifelse(stimulus, .category - 2*K, .category),
@@ -504,16 +505,35 @@ mean_confidence_draws <- function(object, newdata, ..., by_stimulus=TRUE) {
                              joint_response - K, K + 1 - joint_response))
 
   if (by_stimulus) {
-    d |>
-      group_by(.row, .chain, .iteration, .draw, stimulus, !!!syms(.cols)) |>
-      summarize(.epred=sum(.epred*confidence),
-                .groups='keep') |>
-      group_by(.row, stimulus, !!!syms(.cols))
+    if (by_response) {
+      draws |>
+        group_by(.row, .chain, .iteration, .draw, stimulus, response, !!!syms(.cols)) |>
+        mutate(.epred=.epred/sum(.epred)) |>    ## normalize within responses
+        summarize(.epred=sum(.epred*confidence), .groups='keep') |>
+        group_by(.row, stimulus, response, !!!syms(.cols))
+    } else {
+      draws |>
+        group_by(.row, .chain, .iteration, .draw, stimulus, !!!syms(.cols)) |>
+        summarize(.epred=sum(.epred*confidence),
+                  .groups='keep') |>
+        group_by(.row, stimulus, !!!syms(.cols))
+    }
   } else {
-    d |> group_by(.row, .chain, .iteration, .draw, !!!syms(.cols)) |>
-      summarize(.epred=sum(.epred*confidence)/2,
-                .groups='keep') |>
-      group_by(.row, !!!syms(.cols))
+    if (by_response) {
+      draws |>
+        group_by(.row, .chain, .iteration, .draw, !!!syms(.cols), response) |>
+        mutate(.epred=.epred/sum(.epred)) |>
+        group_by(.row, .chain, .iteration, .draw, !!!syms(.cols), response, confidence) |>
+        mutate(.epred=confidence*sum(.epred)) |>
+        group_by(.row, .chain, .iteration, .draw, !!!syms(.cols), response) |>
+        summarize(.epred=sum(.epred)/2, .groups='keep') |>
+        group_by(.row, response, !!!syms(.cols))
+    } else {
+      draws |> group_by(.row, .chain, .iteration, .draw, !!!syms(.cols)) |>
+        summarize(.epred=sum(.epred*confidence)/2,
+                  .groups='keep') |>
+        group_by(.row, !!!syms(.cols))
+    }
   }
 }
 
