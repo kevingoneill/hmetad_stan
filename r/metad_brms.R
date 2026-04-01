@@ -12,8 +12,8 @@ source('metad_brms_utils.R')
 ################################################################################
 #                          Basic metad' model
 ################################################################################
-d <- sim_metad(N_trials=100000, d_prime=1, c=1, log_M=-1,
-               c2_0=c(.5, 1), c2_1=c(.5, 1))
+d <- sim_metad(N_trials=1000000, d_prime=.75, c=-.5, log_M=-1,
+               c2_0=c(.25, .75), c2_1=c(.5, 1))
 
 m <- fit_metad(bf(N ~ 0 + Intercept), data=d,
                cores=4, backend='cmdstanr',
@@ -25,6 +25,7 @@ m <- fit_metad(bf(N ~ 0 + Intercept), data=d,
                  prior(lognormal(0, 1), class=metac2one1diff) +
                  prior(lognormal(0, 1), class=metac2one2diff))
 summary(m, prior=TRUE)
+
 
 ## posterior predictions (counts of type 1/type 2 responses)
 predicted_draws(m, metad_aggregate(d)) |>
@@ -67,9 +68,9 @@ tibble(.row=1) |>
   median_qi(.epred) |>
   left_join(d |>
               group_by(stimulus, response, confidence) |>
-              summarize(across(theta_1:theta_2, first)) |>
-              group_by(stimulus) |>
-              summarize(.true=sum(theta_1 * theta_2 * confidence)))
+              summarize(theta_2=first(theta_2)) |>
+              group_by(stimulus, response) |>
+              summarize(.true=sum(theta_2 * confidence)))
 
 # psuedo type-1 ROC
 tibble(.row=1) |>
@@ -104,22 +105,26 @@ tibble(.row=1) |>
 # model parameters
 tibble(.row=1) |>
   add_linpred_draws(m, dpar=TRUE, transform=TRUE) |>
-  mutate(meta_dprime=mu * dprime,
-         across(starts_with('metac2'), ~ . / meta_dprime))
+  pivot_longer(.linpred:metac2one3diff, names_to='.variable', values_to='.value') |>
+  group_by(.variable, .add=TRUE) |>
+  median_qi()
 
 ################################################################################
 #                    Basic meta-d' model w/ Gumbel-min noise
 ################################################################################
-gumbel_min <- stanvar(scode='
-real gumbel_min_lccdf(real y) {
-  return -exp(y);
-}
-real gumbel_min_lcdf(real y) {
-  return log1m_exp(-exp(y));
-}
-', block='functions')
+gumbel_min_lccdf <- function(y, g) { -exp(y - g) }
+gumbel_min_lcdf <- function(y, g) { log1p(-exp(-exp(y - g))) };
 
-g <- fit_metad(bf(M ~ 0 + Intercept), data=d,
+gumbel_min <- stanvar(scode='
+  real gumbel_min_lccdf(real y, real g) {
+    return -exp(y - g);
+  }
+  real gumbel_min_lcdf(real y, real g) {
+    return log1m_exp(-exp(y - g));
+  }',
+  block='functions')
+
+g <- fit_metad(bf(N ~ 0 + Intercept), data=d,
                cores=4, backend='cmdstanr',
                prior=prior(normal(0, 1)) +
                  prior(normal(0, 1), class=dprime) +
@@ -134,7 +139,7 @@ summary(g, prior=TRUE)
 epred_draws(g, newdata=tibble(.row=1)) |>
   group_by(.row, .category) |>
   median_qi(.epred) |>
-  mutate(.true=response_probabilities(g$data$M[1,])) |>
+  mutate(.true=response_probabilities(g$data$N[1,])) |>
   separate(.category, into=c('var', 'stimulus', 'joint_response'),
            sep='_', convert=TRUE) |>
   mutate(response=factor(as.integer(joint_response > max(joint_response)/2)),
@@ -149,31 +154,14 @@ epred_draws(g, newdata=tibble(.row=1)) |>
   theme_classic(18)
 
 ## calculate mean confidence per stimulus
-epred_draws(g, tibble(.row=1)) |>
-  group_by(.draw) |>
-  mutate(stimulus=rep(0:1, each=n_distinct(d$confidence)*2)) |>
-  group_by(stimulus, .draw) |>
-  summarize(.epred=list(.epred)) |>
-  mutate(.mean=map_dbl(.epred, `%*%`,
-                       c(n_distinct(d$confidence):1,
-                         1:(n_distinct(d$confidence))))) |>
-  median_qi(.mean) |>
-  left_join(d |>
-              group_by(stimulus, response, confidence) |>
-              summarize(across(theta_1:theta_2, first)) |>
-              group_by(stimulus) |>
-              summarize(.true=sum(theta_1 * theta_2 * confidence)))
-
-
-## calculate mean confidence per stimulus
 tibble(.row=1) |>
   add_mean_confidence_draws(g) |>
   median_qi(.epred) |>
   left_join(d |>
               group_by(stimulus, response, confidence) |>
-              summarize(across(theta_1:theta_2, first)) |>
-              group_by(stimulus) |>
-              summarize(.true=sum(theta_1 * theta_2 * confidence)))
+              summarize(theta_2=first(theta_2)) |>
+              group_by(stimulus, response) |>
+              summarize(.true=sum(theta_2 * confidence)))
 
 
 # psuedo type-1 ROC
@@ -270,9 +258,9 @@ d |>
   median_qi(.epred) |>
   left_join(d |>
               group_by(condition, stimulus, response, confidence) |>
-              summarize(across(theta_1:theta_2, first)) |>
-              group_by(condition, stimulus) |>
-              summarize(.true=sum(theta_1 * theta_2 * confidence)))
+              summarize(theta_2=first(theta_2)) |>
+              group_by(condition, stimulus, response) |>
+              summarize(.true=sum(theta_2 * confidence)))
 
 
 # psuedo type-1 ROC
@@ -382,9 +370,9 @@ d |>
   median_qi(.epred) |>
   left_join(d |>
               group_by(condition, stimulus, response, confidence) |>
-              summarize(across(theta_1:theta_2, first)) |>
-              group_by(condition, stimulus) |>
-              summarize(.true=sum(theta_1 * theta_2 * confidence)))
+              summarize(theta_2=first(theta_2)) |>
+              group_by(condition, stimulus, response) |>
+              summarize(.true=sum(theta_2 * confidence)))
 
 
 # psuedo type-1 ROC

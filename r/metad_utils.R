@@ -1,6 +1,6 @@
 #' to_signed(x):
 #'   convert binary x from {0, 1} to {-1, 1}
-to_signed <- function(x) 2*x-1
+to_signed <- function(x) ifelse(x, 1, -1)
 
 #' type1_pmf(stimulus, response, d_prime, c):
 #'   Determine the probability of `response` given `stimulus` for

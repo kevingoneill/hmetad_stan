@@ -1,11 +1,11 @@
 // Convert a binary number x from {0, 1} to {-1, 1}
-int to_polar(int x) {
+int to_signed(int x) {
   return 2*x - 1;
 }
 
 // Calculate the probability of making a response given a stimulus
 real type1_pmf(int stimulus, int response, real d_prime, real c) {
-  return Phi(to_polar(response) * (to_polar(stimulus)*d_prime/2 - c));
+  return Phi(to_signed(response) * (to_signed(stimulus)*d_prime/2 - c));
 }
 
 // Create a K-simplex of probabilities that confidence=k
@@ -19,7 +19,7 @@ real type1_pmf(int stimulus, int response, real d_prime, real c) {
 vector type2_pmf(int response, int accuracy, real meta_d_prime,
                  real meta_c, vector meta_c2_0, vector meta_c2_1) {
   int K = size(meta_c2_0) + 1;
-  real mu = to_polar(accuracy) * meta_d_prime / 2;
+  real mu = to_signed(accuracy) * meta_d_prime / 2;
     
   // set response-specific thresholds for vectorization
   vector[K+1] C2;
@@ -48,22 +48,21 @@ vector metad_joint_pmf(int stimulus, real d_prime, real c,
   int K = size(meta_c2_0)+1;
     
   // type-1 response probabilities
-  real lp_1 = std_normal_lcdf(to_polar(stimulus)*d_prime/2 - c);
-  real lp_0 = std_normal_lccdf(to_polar(stimulus)*d_prime/2 - c);
+  real lp_1 = std_normal_lccdf(c - to_signed(stimulus)*d_prime/2);
+  real lp_0 = std_normal_lcdf(c - to_signed(stimulus)*d_prime/2);
 
-  // means of type-2 distributions
-  real meta_mu_1 = to_polar(stimulus) * meta_d_prime/2;
-  real meta_mu_0 = -meta_mu_1;
+  // mean of type-2 distribution
+  real meta_mu = to_signed(stimulus) * meta_d_prime/2;
 
   vector[K] lp2_1;         // normal CDFs (response == 1)
   vector[K] lp2_0;         // normal CDFs (response == 0)
 	vector[2*K] log_theta;   // joint (type-1 x type-2) response probabilities
 	
-  lp2_1[1] = std_normal_lcdf(meta_mu_1 - meta_c);
-  lp2_0[1] = std_normal_lcdf(meta_mu_0 + meta_c);
+  lp2_1[1] = std_normal_lccdf(meta_c - meta_mu);
+  lp2_0[1] = std_normal_lcdf(meta_c - meta_mu);
   for (k in 2:K) {
-    lp2_1[k] = std_normal_lcdf(meta_mu_1 - meta_c2_1[k-1]);
-    lp2_0[k] = std_normal_lcdf(meta_mu_0 + meta_c2_0[k-1]);
+    lp2_1[k] = std_normal_lccdf(meta_c2_1[k-1] - meta_mu);
+    lp2_0[k] = std_normal_lcdf(meta_c2_0[k-1] - meta_mu);
 
 		log_theta[K-k+2] = log_diff_exp(lp2_0[k-1], lp2_0[k]);
     log_theta[K+k-1] = log_diff_exp(lp2_1[k-1], lp2_1[k]);
@@ -127,9 +126,9 @@ real induced_dirichlet_response(vector alpha, int response, int accuracy,
                                 vector meta_c2_0, vector meta_c2_1) {
   int K = size(meta_c2_0) + 1;
   // pre-compute evidence mean and type 1 response probability
-  real mu = to_polar(accuracy) * meta_d_prime / 2;
-  real p = Phi(to_polar(response) * (mu - meta_c));
-  real r = to_polar(response);
+  real mu = to_signed(accuracy) * meta_d_prime / 2;
+  real p = Phi(to_signed(response) * (mu - meta_c));
+  real r = to_signed(response);
         
 
   vector[K] C2;

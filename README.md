@@ -3,6 +3,8 @@
 An implementation of the (hierarchical) meta-d' model of confidence
 ratings in [Stan](https://mc-stan.org).
 
+**NOTE: this implementation of the meta-d' model has now been deprecated in favor of the [hmetad package](https://metacoglab.github.io/hmetad/) in R. The Stan code will remain here for those interested in programming custom implementations of the model, but we recommend users to instead use the package to generate template Stan code which can be modified as needed.**
+
 This software is adapted from the [HMeta-d
 Toolbox](https://github.com/metacoglab/HMeta-d), which was a previous
 implementation in JAGS. Beyond the change in estimation software
